@@ -1,4 +1,5 @@
-GPU_DEVICE_ID=3
+#! /bin/bash/
+GPU_DEVICE_ID=2
 
 DATA_PATH="data-bin/wmt14.en-fr.newstest2014"
 
@@ -15,7 +16,8 @@ do
 	fi
 	CUDA_VISIBLE_DEVICES=$GPU_DEVICE_ID fairseq-generate ./$DATA_PATH \
     		--path ./$MODEL_PATH/$CHECKPOINT_PATH \
-    		--batch-size 64 --beam $i --remove-bpe --diverse-beam-strength 0 > ./$OUT_PATH/gen.out
+    		--batch-size 64 --beam $i --remove-bpe --diverse-beam-strength 0 \
+		--lenpen 0 > ./$OUT_PATH/gen.out
 done
 
 for i in {10..50..10}
@@ -27,6 +29,7 @@ do
 	fi
 	CUDA_VISIBLE_DEVICES=$GPU_DEVICE_ID fairseq-generate ./$DATA_PATH \
     		--path ./$MODEL_PATH/$CHECKPOINT_PATH \
-    		--batch-size 16 --beam $i --remove-bpe --diverse-beam-strength 0 > ./$OUT_PATH/gen.out
+    		--batch-size 16 --beam $i --remove-bpe --diverse-beam-strength 0 \
+		--lenpen 0 > ./$OUT_PATH/gen.out
 done
 
