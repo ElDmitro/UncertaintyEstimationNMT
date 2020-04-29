@@ -81,40 +81,25 @@ class EnsembleModel(torch.nn.Module):
         return [model.encoder(**encoder_input) for model in self.models]
 
     @torch.no_grad()
-    def forward_decoder(self, tokens, encoder_outs, temperature=1., with_var=True):
-        if len(self.models) == 1:
-            probs, attn, pvars, pentropy = self._decode_one(
-                tokens,
-                self.models[0],
-                encoder_outs[0] if self.has_encoder() else None,
-                self.incremental_states,
-                log_probs=True,
-                temperature=temperature,
-                with_var=True
-            )
-            if with_var:
-                probs_vars = torch.zeros(probs.size(), device=probs.device)
-                ens_var = probs.var(-1)
-                return probs, attn, probs_vars, probs_vars, torch.stack([pvars], dim=0), torch.stack([pentropy], dim=0), ens_var, ens_var
-            return probs, attn, None
-
+    def forward_decoder(self, tokens, encoder_outs, temperature=1., with_stats=True):
         log_probs = []
-        sing_var = []
-        sing_entropy = []
+        models_singular_softmax_var = []
+        models_singular_softmax_entropy = []
         avg_attn = None
         for model, encoder_out in zip(self.models, encoder_outs):
-            probs, attn, pvars, pentropy = self._decode_one(
+            probs, attn, singular_softmax_var, singular_softmax_entropy = self._decode_one(
                 tokens,
                 model,
                 encoder_out,
                 self.incremental_states,
                 log_probs=True,
                 temperature=temperature,
-                with_var=True
+                with_stats=True
             )
+
             log_probs.append(probs)
-            sing_var.append(pvars)
-            sing_entropy.append(pentropy)
+            models_singular_softmax_var.append(singular_softmax_var)
+            models_singular_softmax_entropy.append(singular_softmax_entropy)
             if attn is not None:
                 if avg_attn is None:
                     avg_attn = attn
@@ -124,25 +109,35 @@ class EnsembleModel(torch.nn.Module):
         avg_probs = torch.logsumexp(torch.stack(log_probs, dim=0), dim=0) - math.log(len(self.models))
 
         e_avg_probs = torch.exp(avg_probs)
-        ensemble_var = e_avg_probs.var(-1)
-        ensemble_entropy = shannon_entropy(e_avg_probs, -1)
+        ensemble_softmax_var = e_avg_probs.var(-1)
+        ensemble_softmax_entropy = shannon_entropy(e_avg_probs, -1)
 
-        e_probs = torch.exp(torch.stack(log_probs, dim=0))
-        probs_mean = e_probs.mean(dim=0)
-        probs_var = e_probs.var(dim=0)
+        e_models_singular_probs = torch.exp(torch.stack(log_probs, dim=0))
+        # inens_probs_mean = e_models_singular_probs.mean(dim=0)
+        inens_probs_mean = avg_probs.clone().detach()
+        inens_probs_var = e_models_singular_probs.var(dim=0)
 
-        sing_var = torch.stack(sing_var, dim=0)
-        sing_entropy = torch.stack(sing_entropy, dim=0)
+        models_singular_softmax_var = torch.stack(models_singular_softmax_var, dim=0)
+        models_singular_softmax_entropy = torch.stack(models_singular_softmax_entropy, dim=0)
         if avg_attn is not None:
             avg_attn.div_(len(self.models))
-        if with_var:
-            return avg_probs, avg_attn, probs_mean, probs_var, sing_var, sing_entropy, ensemble_var, ensemble_entropy, e_probs
+        if with_stats:
+            return avg_probs, avg_attn, {
+                'inens_probs_var': inens_probs_var,
+                'inens_probs_mean': inens_probs_mean,
+                'softmax_probs_var_models': models_singular_softmax_var.transpose(0, 1),
+                'softmax_probs_entropy_models': models_singular_softmax_entropy.transpose(0, 1),
+                'softmax_probs_var_ens': ensemble_softmax_var,
+                'softmax_probs_entropy_ens': ensemble_softmax_entropy,
+                'inens_probs_dist': e_models_singular_probs.transpose(0, 1),
+            }
+
         return avg_probs, avg_attn, probs_var
 
     def _decode_one(
         self, tokens, model, encoder_out, incremental_states, log_probs,
         temperature=1.,
-        with_var=False
+        with_stats=False
     ):
         if self.incremental_states is not None:
             decoder_out = list(model.forward_decoder(
@@ -160,10 +155,11 @@ class EnsembleModel(torch.nn.Module):
             attn = attn[0]
         if attn is not None:
             attn = attn[:, -1, :]
+
         probs = model.get_normalized_probs(decoder_out, log_probs=log_probs)
         probs = probs[:, -1, :]
         e_probs = torch.exp(probs)
-        if with_var:
+        if with_stats:
             return probs, attn, e_probs.var(dim=1), shannon_entropy(e_probs, 1) 
         return probs, attn
 
@@ -205,7 +201,7 @@ class SourceSequenceGenerator(SequenceGenerator):
         sample,
         prefix_tokens=None,
         bos_token=None,
-        with_var=False,
+        with_stats=False,
         **kwargs
     ):
         if not self.retain_dropout:
@@ -269,19 +265,18 @@ class SourceSequenceGenerator(SequenceGenerator):
         if return_all_tokens:
             all_tokens = tokens.data.new(max_len + 2, 2 * bsz * beam_size).fill_(self.pad)
             all_scores = scores.data.new(max_len + 2, 2 * bsz * beam_size).fill_(0)
-            all_softmaxes = torch.zeros(max_len + 2, beam_size, self.vocab_size)
-            all_vars = scores.data.new(max_len + 2, 2 * bsz * beam_size).fill_(0)
-            all_vars_vocab = torch.zeros(max_len + 2, beam_size, self.vocab_size)
-            all_means = scores.data.new(max_len + 2, 2 * bsz * beam_size).fill_(0)
-            all_means_vocab = torch.zeros(max_len + 2, beam_size, self.vocab_size)
-            all_sing_vars = torch.zeros(max_len + 2, models_num, beam_size)
-            all_sing_entropy = torch.zeros(max_len + 2, models_num, beam_size)
-            all_ens_vars = torch.zeros(max_len + 2, beam_size)
-            all_ens_entropy = torch.zeros(max_len + 2, beam_size)
             is_finalized = torch.zeros(max_len + 2, bsz * beam_size, dtype=torch.uint8)
             all_bbsz_idx = torch.zeros(max_len + 2, 2 * bsz * beam_size, dtype=torch.uint8)
-            all_inens_dist = torch.zeros(max_len + 2, models_num, beam_size, self.vocab_size)
-            all_lprobs = []
+            all_stats = {
+                'inens_probs_var': torch.zeros(max_len + 2, 2 * bsz * beam_size, self.vocab_size, dtype=torch.float32),
+                'inens_probs_mean': torch.zeros(max_len + 2, 2 * bsz * beam_size, self.vocab_size, dtype=torch.float32),
+                'inens_probs_dist': torch.zeros(max_len + 2, 2 * bsz * beam_size, models_num, self.vocab_size, dtype=torch.float32),
+                'softmax_probs_var_models': torch.zeros(max_len + 2, 2 * bsz * beam_size, models_num, dtype=torch.float32),
+                'softmax_probs_entropy_models': torch.zeros(max_len + 2, 2 * bsz * beam_size, models_num, dtype=torch.float32),
+                'softmax_probs_var_ens': torch.zeros(max_len + 2, 2 * bsz * beam_size, dtype=torch.float32),
+                'softmax_probs_entropy_ens': torch.zeros(max_len + 2, 2 * bsz * beam_size, dtype=torch.float32),
+                'softmax_probs': torch.zeros(max_len + 2, 2 * bsz * beam_size, self.vocab_size, dtype=torch.float32),
+            }
 
         # number of candidate hypos per step
         cand_size = 2 * beam_size  # 2 x beam size in case half are EOS
@@ -403,9 +398,10 @@ class SourceSequenceGenerator(SequenceGenerator):
                 model.reorder_incremental_state(reorder_state)
                 encoder_outs = model.reorder_encoder_out(encoder_outs, reorder_state)
 
-            lprobs, avg_attn_scores, probs_means, probs_vars, sing_vars, sing_entropy, ens_vars, ens_entropy, inens_dist = model.forward_decoder(
-                tokens[:, :step + 1], encoder_outs, temperature=self.temperature, with_var=True
+            lprobs, avg_attn_scores, stats = model.forward_decoder(
+                tokens[:, :step + 1], encoder_outs, temperature=self.temperature, with_stats=True
             )
+
             lprobs[lprobs != lprobs] = -math.inf
 
             lprobs[:, self.pad] = -math.inf  # never select pad
@@ -418,43 +414,44 @@ class SourceSequenceGenerator(SequenceGenerator):
 
             # handle prefix tokens (possibly with different lengths)
             if prefix_tokens is not None and step < prefix_tokens.size(1) and step < max_len:
-                prefix_toks = prefix_tokens[:, step].unsqueeze(-1).repeat(1, beam_size).view(-1)
-                prefix_lprobs = lprobs.gather(-1, prefix_toks.unsqueeze(-1))
-                prefix_vars = probs_vars.gather(-1, prefix_toks.unsqueeze(-1))
-                prefix_means = probs_means.gather(-1, prefix_toks.unsqueeze(-1))
-                prefix_mask = prefix_toks.ne(self.pad)
-                lprobs[prefix_mask] = -math.inf
-                # TODO
-                lprobs[prefix_mask] = lprobs[prefix_mask].scatter_(
-                    -1, prefix_toks[prefix_mask].unsqueeze(-1), prefix_lprobs[prefix_mask]
-                )
-                probs_vars[prefix_mask] = probs_vars[prefix_mask].scatter_(
-                    -1, prefix_toks[prefix_mask].unsqueeze(-1), prefix_vars[prefix_mask]
-                )
-                probs_means[prefix_mask] = probs_means[prefix_mask].scatter_(
-                    -1, prefix_toks[prefix_mask].unsqueeze(-1), prefix_means[prefix_mask]
-                )
-                # if prefix includes eos, then we should make sure tokens and
-                # scores are the same across all beams
-                eos_mask = prefix_toks.eq(self.eos)
-                if eos_mask.any():
-                    # validate that the first beam matches the prefix
-                    first_beam = tokens[eos_mask].view(-1, beam_size, tokens.size(-1))[:, 0, 1:step + 1]
-                    eos_mask_batch_dim = eos_mask.view(-1, beam_size)[:, 0]
-                    target_prefix = prefix_tokens[eos_mask_batch_dim][:, :step]
-                    assert (first_beam == target_prefix).all()
+                raise NotImplementedError
+                # prefix_toks = prefix_tokens[:, step].unsqueeze(-1).repeat(1, beam_size).view(-1)
+                # prefix_lprobs = lprobs.gather(-1, prefix_toks.unsqueeze(-1))
+                # prefix_vars = probs_vars.gather(-1, prefix_toks.unsqueeze(-1))
+                # prefix_means = probs_means.gather(-1, prefix_toks.unsqueeze(-1))
+                # prefix_mask = prefix_toks.ne(self.pad)
+                # lprobs[prefix_mask] = -math.inf
+                # # TODO
+                # lprobs[prefix_mask] = lprobs[prefix_mask].scatter_(
+                #     -1, prefix_toks[prefix_mask].unsqueeze(-1), prefix_lprobs[prefix_mask]
+                # )
+                # probs_vars[prefix_mask] = probs_vars[prefix_mask].scatter_(
+                #     -1, prefix_toks[prefix_mask].unsqueeze(-1), prefix_vars[prefix_mask]
+                # )
+                # probs_means[prefix_mask] = probs_means[prefix_mask].scatter_(
+                #     -1, prefix_toks[prefix_mask].unsqueeze(-1), prefix_means[prefix_mask]
+                # )
+                # # if prefix includes eos, then we should make sure tokens and
+                # # scores are the same across all beams
+                # eos_mask = prefix_toks.eq(self.eos)
+                # if eos_mask.any():
+                #     # validate that the first beam matches the prefix
+                #     first_beam = tokens[eos_mask].view(-1, beam_size, tokens.size(-1))[:, 0, 1:step + 1]
+                #     eos_mask_batch_dim = eos_mask.view(-1, beam_size)[:, 0]
+                #     target_prefix = prefix_tokens[eos_mask_batch_dim][:, :step]
+                #     assert (first_beam == target_prefix).all()
 
-                    def replicate_first_beam(tensor, mask):
-                        tensor = tensor.view(-1, beam_size, tensor.size(-1))
-                        tensor[mask] = tensor[mask][:, :1, :]
-                        return tensor.view(-1, tensor.size(-1))
+                #     def replicate_first_beam(tensor, mask):
+                #         tensor = tensor.view(-1, beam_size, tensor.size(-1))
+                #         tensor[mask] = tensor[mask][:, :1, :]
+                #         return tensor.view(-1, tensor.size(-1))
 
-                    # copy tokens, scores and lprobs from the first beam to all beams
-                    tokens = replicate_first_beam(tokens, eos_mask_batch_dim)
-                    scores = replicate_first_beam(scores, eos_mask_batch_dim)
-                    lprobs = replicate_first_beam(lprobs, eos_mask_batch_dim)
-                    probs_vars = replicate_first_beam(probs_vars, eos_mask_batch_dim)
-                    probs_means = replicate_first_beam(probs_means, eos_mask_batch_dim)
+                #     # copy tokens, scores and lprobs from the first beam to all beams
+                #     tokens = replicate_first_beam(tokens, eos_mask_batch_dim)
+                #     scores = replicate_first_beam(scores, eos_mask_batch_dim)
+                #     lprobs = replicate_first_beam(lprobs, eos_mask_batch_dim)
+                #     probs_vars = replicate_first_beam(probs_vars, eos_mask_batch_dim)
+                #     probs_means = replicate_first_beam(probs_means, eos_mask_batch_dim)
             elif step < self.min_len:
                 # minimum length constraint (does not apply if using prefix_tokens)
                 lprobs[:, self.eos] = -math.inf
@@ -499,7 +496,7 @@ class SourceSequenceGenerator(SequenceGenerator):
                     lprobs[bbsz_idx, banned_tokens[bbsz_idx]] = -math.inf
 
 
-            clean_lprobs = lprobs.clone().detach()
+            stats['softmax_probs'] = lprobs.clone().detach()
             cand_scores, cand_indices, cand_beams = self.search.step(
                 step,
                 lprobs.view(bsz, -1, self.vocab_size),
@@ -508,35 +505,24 @@ class SourceSequenceGenerator(SequenceGenerator):
             
             ishape = cand_indices.shape[1]
             cand_vars = torch.ones((bsz, ishape))
-            if with_var:
-                boffsets = (torch.cumsum(
-                    torch.full((bsz, ), ishape, dtype=torch.int64, device=cand_indices.device) - ishape,
-                    dim=0
-                )).unsqueeze_(-1).T
 
-                boffset_idxs = (cand_indices + boffsets).flatten()
-                cand_vars = probs_vars.flatten()[boffset_idxs].view(bsz, -1)
-                cand_means = probs_means.flatten()[boffset_idxs].view(bsz, -1)
 
             # cand_bbsz_idx contains beam indices for the top candidate
             # hypotheses, with a range of values: [0, bsz*beam_size),
             # and dimensions: [bsz, cand_size]
             cand_bbsz_idx = cand_beams.add(bbsz_offsets)
+            if with_stats:
+                for key in stats:
+                    stats[key] = stats[key][cand_beams]
+
             
             if return_all_tokens:
                 all_scores[step + 1] = cand_scores #-scores[cand_beams,step-1]
-                all_softmaxes[step + 1] = clean_lprobs
-                all_vars[step + 1] = cand_vars
-                all_vars_vocab[step + 1] = probs_vars
-                all_means[step + 1] = cand_means
-                all_means_vocab[step + 1] = probs_means
                 all_tokens[step + 1] = cand_indices
                 all_bbsz_idx[step] = cand_bbsz_idx
-                all_sing_vars[step + 1] = sing_vars
-                all_sing_entropy[step + 1] = sing_entropy
-                all_ens_vars[step + 1] = ens_vars
-                all_ens_entropy[step + 1] = ens_entropy
-                all_inens_dist[step + 1] = inens_dist
+
+                for key in all_stats:
+                    all_stats[key][step + 1] = stats[key]
 
 
 
@@ -674,25 +660,17 @@ class SourceSequenceGenerator(SequenceGenerator):
             finalized[sent] = sorted(finalized[sent], key=lambda r: r['score'], reverse=True)
             
         if return_all_tokens:
+            for key in all_stats:
+                all_stats[key] = all_stats[key][:step + 2].cpu()
             all_scores = all_scores[:step + 2]
-            all_softmaxes = all_softmaxes[:step + 2]
-            all_vars = all_vars[:step + 2]
-            all_vars_vocab = all_vars_vocab[:step + 2]
-            all_means = all_means[:step + 2]
-            all_means_vocab = all_means_vocab[:step + 2]
-            all_sing_vars = all_sing_vars[:step + 2]
-            all_sing_entropy = all_sing_entropy[:step + 2]
-            all_ens_vars = all_ens_vars[:step + 2]
-            all_ens_entropy = all_ens_entropy[:step + 2]
-            all_inens_dist = all_inens_dist[:step + 2]
-            if with_var:
-                    return finalized, all_tokens[:step + 2].cpu(), all_scores.cpu(), is_finalized[:step + 1].cpu(), all_bbsz_idx[:step+1].cpu(), all_softmaxes.cpu(), all_means.cpu(), all_means_vocab.cpu(), all_vars.cpu(), all_vars_vocab.cpu(), all_sing_vars.cpu(), all_sing_entropy.cpu(), all_ens_vars.cpu(), all_ens_entropy.cpu(), all_inens_dist.cpu()
-                
+
+            if with_stats:
+                    return finalized, all_tokens[:step + 2].cpu(), all_scores.cpu(), is_finalized[:step + 1].cpu(), all_bbsz_idx[:step+1].cpu(), all_stats
             return finalized, all_tokens[:step + 2].cpu(), all_scores.cpu(), is_finalized[:step + 1].cpu(), all_bbsz_idx[:step+1].cpu()
         return finalized
 
 
-def get_stats_distribution(ref_tokens, tgt_tokens, token_cmp, inens_mean_vocab, inens_var_vocab, *args):
+def get_stats_distribution(ref_tokens, tgt_tokens, token_cmp, stats, is_stats_by_vocab):
     ref_len = ref_tokens.shape[0]
     tgt_len = tgt_tokens.shape[0]
     max_len = min(ref_len, tgt_len)
@@ -707,67 +685,60 @@ def get_stats_distribution(ref_tokens, tgt_tokens, token_cmp, inens_mean_vocab, 
     stats_true = dict()
     stats_false = dict()
     stats_falsetrue = dict()
-    for name, score in args:
-        stats_true[name] = score[:max_len][mask].tolist()
+    for name, score in stats.items():
+        if is_stats_by_vocab[name]:
+            stats_true[name] = score[:max_len][mask, ..., tgt_tokens[:max_len][mask]].tolist()
+        else:
+            stats_true[name] = score[:max_len][mask].tolist()
+
         if ffalse_idx < max_len:
-            stats_false[name] = [score[:max_len][ffalse_idx].tolist()]
+            if is_stats_by_vocab[name]:
+                stats_false[name] = [score[:max_len][ffalse_idx][..., tgt_tokens[ffalse_idx]].tolist()]
+            else:
+                stats_false[name] = [score[:max_len][ffalse_idx].tolist()]
 
 
     if ffalse_idx < max_len:
-        stats_falsetrue['inens_mean'] = [inens_mean_vocab[:max_len][ffalse_idx][ref_tokens[ffalse_idx]].tolist()]
-        stats_falsetrue['inens_var'] = [inens_var_vocab[:max_len][ffalse_idx][ref_tokens[ffalse_idx]].tolist()]
+        for name, score in stats.items():
+            if not is_stats_by_vocab[name]:
+                continue
+
+            stats_falsetrue[name] = [score[:max_len][ffalse_idx][..., ref_tokens[ffalse_idx]].tolist()]
 
     stats_true['tokens'] = tgt_tokens[:max_len][mask].tolist()
     if ffalse_idx < max_len:
         stats_false['tokens'] = [tgt_tokens[:max_len][ffalse_idx].tolist()]
+        stats_falsetrue['tokens'] = [ref_tokens[:max_len][ffalse_idx].tolist()]
         
     return stats_true, stats_false, stats_falsetrue
-        
 
-def get_translation_stats(tgt_tokens, beam_tokens, bbsz_idx, beam_scores, beam_means, beam_means_vocab, beam_vars, beam_vars_vocab, beam_softmaxes, inens_dist):
+
+def get_translation_stats(tgt_tokens, all_tokens, all_bbsz_idx, all_scores, all_stats, blacklist=None):
     tgt_len = tgt_tokens.shape[0]
-    beam_size = beam_softmaxes.size(1)
+
+    tscores = []
+    processed_stats = defaultdict(list)
 
     last_idx = 0
-    tscores = []
-    tvars = []
-    tmeans = []
-    tsoftmaxes = []
-    tmeans_vocab = []
-    tvars_vocab = []
-    tinens_dist = []
-    idx = torch.arange(beam_tokens.shape[1])
+    idx = torch.arange(all_tokens.shape[1])
     for i in range(1, tgt_len + 1):
-        mask = (beam_tokens[i] == tgt_tokens[i - 1]) & (bbsz_idx[i - 1] == last_idx)
-        half_mask = mask[:beam_size]
+        mask = (all_tokens[i] == tgt_tokens[i - 1]) & (all_bbsz_idx[i - 1] == last_idx)
 
-        tscores.append(beam_scores[i][mask][0])
-        tvars.append(beam_vars[i][mask][0])
-        tmeans.append(beam_means[i][mask][0])
-        tsoftmaxes.append(beam_softmaxes[i][half_mask][0])
-        tmeans_vocab.append(beam_means_vocab[i][half_mask][0])
-        tvars_vocab.append(beam_vars_vocab[i][half_mask][0])
-        tinens_dist.append(inens_dist[i][:, half_mask][:, 0][:, tgt_tokens[i - 1]])
+        tscores.append(all_scores[i][mask][0]) 
+        for key in all_stats:
+            if (blacklist is not None) and (key in blacklist):
+                continue
+            processed_stats[key].append(all_stats[key][i][mask][0])
+
         last_idx = idx[mask][0]
 
-    return torch.stack(tscores), torch.stack(tmeans), torch.stack(tmeans_vocab), torch.stack(tvars), torch.stack(tvars_vocab), torch.stack(tsoftmaxes), torch.stack(tinens_dist)
+    for key in processed_stats:
+        processed_stats[key] = torch.stack(processed_stats[key])
+
+    return torch.stack(tscores), processed_stats
 
 
-def get_eos_stats_distribution(tgt_dict, tokens, probs, inens_vars):
-    n, m = tokens.shape
-
-    eos_token = tgt_dict.eos()
-    idxs = torch.repeat_interleave(torch.arange(n), m).view(n, m)
-    eos_mask = tokens == eos_token
-
-    return {
-        'probs': probs[eos_mask].tolist(),
-        'inens_vars': inens_vars[eos_mask].tolist(),
-        'token_idxs': idxs[eos_mask].tolist(),
-    }
-
-
-def get_wrong_suff_stats_distribution(ref_tokens, tgt_tokens, *args):
+def get_wrong_suff_stats_distribution(ref_tokens, tgt_tokens, all_stats, is_stats_by_vocab):
     ref_len = ref_tokens.shape[0]
     tgt_len = tgt_tokens.shape[0]
     max_len = min(ref_len, tgt_len)
@@ -791,10 +762,13 @@ def get_wrong_suff_stats_distribution(ref_tokens, tgt_tokens, *args):
     ))
 
     stats = dict()
-    for name, score in args:
-        stats[name] = score[~mask].tolist()
+    for name, score in all_stats.items():
+        if is_stats_by_vocab[name]:
+            stats[name] = score[~mask, ..., tgt_tokens[~mask]].tolist()
+        else:
+            stats[name] = score[~mask].tolist()
+
     stats['tokens'] = tgt_tokens[~mask].tolist()
-    assert 2 in stats['tokens']
     stats['is_true'] = true_mask[~mask].tolist()
 
     return stats
@@ -932,76 +906,54 @@ for batch in progress:
         sample = utils.move_to_cuda(sample) if use_cuda else sample
         ref_tokens = batch['target'][i]
 
-        translations, all_tokens, all_scores, is_finalized, all_bbsz_idx, all_softmaxes, all_means, all_means_vocab, all_vars, all_vars_vocab, all_sing_vars, all_sing_entropy, all_ens_vars, all_ens_entropy, all_inens_dist = translator.generate(
+        translations, all_tokens, all_scores, is_finalized, all_bbsz_idx, all_stats = translator.generate(
             models=models,
             sample=sample,
             return_all_tokens=True,
-            with_var=True
+            with_stats=True
         )
-
-        all_sing_vars = all_sing_vars.mean(-1)
-        all_sing_entropy = all_sing_entropy.mean(-1)
-        all_ens_vars = all_ens_vars.mean(-1)
-        all_ens_entropy = all_ens_entropy.mean(-1)
 
         tgt_tokens = translations[0][0]['tokens'].cpu()
         tgt_len = tgt_tokens.shape[0]
-        probs, inens_mean, inens_mean_vocab, inens_var, inens_var_vocab, ens_softmaxes, inens_dist = get_translation_stats(tgt_tokens, all_tokens, all_bbsz_idx, all_scores, all_means, all_means_vocab, all_vars, all_vars_vocab, all_softmaxes, all_inens_dist)
-        all_ens_vars = all_ens_vars[1:tgt_len + 1]
-        all_ens_entropy = all_ens_entropy[1:tgt_len + 1]
-        all_sing_vars = all_sing_vars[1:tgt_len + 1]
-        all_sing_entropy = all_sing_entropy[1:tgt_len + 1]
+        probs, all_stats = get_translation_stats(tgt_tokens, all_tokens, all_bbsz_idx, all_scores, all_stats)
+        all_stats['prob'] = probs
 
-        # TODO(eldmitro): collect ens softmax wisely
-        scores = [
-            ('prob', probs),
-            ('inens_var', inens_var),
-            ('inens_mean', inens_mean),
-            ('ens_softmax', torch.exp(ens_softmaxes)),
-            ('inens_dist', inens_dist),
-            ('ens_svar', all_ens_vars),
-            ('ens_entropy', all_ens_entropy),
-        ]
-        for i in range(len(models)):
-            name = 'm{}_svar'.format(i)
-            scores.append((name, all_sing_vars[:, i]))
-            name = 'm{}_entropy'.format(i)
-            scores.append((name, all_sing_entropy[:, i]))
+        is_score_by_vocab = {
+            'prob': False,
+            'inens_probs_var': True,
+            'inens_probs_mean': True,
+            'inens_probs_dist': True,
+            'softmax_probs_var_models': False,
+            'softmax_probs_entropy_models': False,
+            'softmax_probs_var_ens': False,
+            'softmax_probs_entropy_ens': False,
+            'softmax_probs': False,
+        }
+
         
         positive_stats, negative_stats, negative_true_stats = get_stats_distribution(
             ref_tokens,
             tgt_tokens,
             lambda x, y: x == y,
-            inens_mean_vocab,
-            inens_var_vocab,
-            *scores
-        )
-        eos_stats = get_eos_stats_distribution(
-            tgt_dict,
-            all_tokens,
-            all_scores,
-            all_vars
+            all_stats,
+            is_score_by_vocab
         )
         wrong_suff_stats = get_wrong_suff_stats_distribution(
             ref_tokens,
             tgt_tokens,
-            *scores
+            all_stats,
+            is_score_by_vocab
         )
 
         for key in positive_stats:
             global_positive_stats[key].extend(positive_stats[key])
-            if key not in global_positive_stats_by_len[tgt_len]:
-                global_positive_stats_by_len[tgt_len][key] = list()
-            global_positive_stats_by_len[tgt_len][key].extend(positive_stats[key])
+
         for key in negative_stats:
             global_negative_stats[key].extend(negative_stats[key])
-            if key not in global_negative_stats_by_len[tgt_len]:
-                global_negative_stats_by_len[tgt_len][key] = list()
-            global_negative_stats_by_len[tgt_len][key].extend(negative_stats[key])
+
         for key in negative_true_stats:
             global_negative_true_stats[key].extend(negative_true_stats[key])
-        for key in eos_stats:
-            global_eos_stats[key].extend(eos_stats[key])
+
         for key in wrong_suff_stats:
             global_wrong_suff_stats[key].extend(wrong_suff_stats[key])
     break
@@ -1014,11 +966,5 @@ with open(os.path.join(log_dir, 'negative_stats.json'), 'w') as stream_output:
     json.dump(global_negative_stats, stream_output)
 with open(os.path.join(log_dir, 'negative_true_stats.json'), 'w') as stream_output:
     json.dump(global_negative_true_stats, stream_output)
-with open(os.path.join(log_dir, 'eos_stats.json'), 'w') as stream_output:
-    json.dump(global_eos_stats, stream_output)
 with open(os.path.join(log_dir, 'wrong_suff_stats.json'), 'w') as stream_output:
     json.dump(global_wrong_suff_stats, stream_output)
-with open(os.path.join(log_dir, 'positive_stats_by_len.json'), 'w') as stream_output:
-    json.dump(global_positive_stats_by_len, stream_output)
-with open(os.path.join(log_dir, 'negative_stats_by_len.json'), 'w') as stream_output:
-    json.dump(global_negative_stats_by_len, stream_output)
