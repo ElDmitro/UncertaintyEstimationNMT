@@ -132,7 +132,7 @@ class EnsembleModel(torch.nn.Module):
                 'inens_probs_dist': e_models_singular_probs.transpose(0, 1),
             }
 
-        return avg_probs, avg_attn, probs_var
+        return avg_probs, avg_attn
 
     def _decode_one(
         self, tokens, model, encoder_out, incremental_states, log_probs,
@@ -670,10 +670,18 @@ class SourceSequenceGenerator(SequenceGenerator):
         return finalized
 
 
-def get_stats_distribution(ref_tokens, tgt_tokens, token_cmp, stats, is_stats_by_vocab):
+def in1d(a, b):
+    return (a[..., None] == b).any(-1)
+
+
+TOP_TOKENS_LIST = [2, 3, 4, 5, 10, 20, 50]
+MAX_TOP_TOKEN = max(TOP_TOKENS_LIST)
+def get_stats_distribution(ref_tokens, tgt_tokens, token_cmp, stats, is_stats_by_vocab, vocab_size):
     ref_len = ref_tokens.shape[0]
     tgt_len = tgt_tokens.shape[0]
     max_len = min(ref_len, tgt_len)
+
+    random_token = np.random.randint(0, vocab_size)
    
     idxs = torch.arange(max_len)
     mask = token_cmp(ref_tokens[:max_len], tgt_tokens[:max_len])
@@ -685,6 +693,8 @@ def get_stats_distribution(ref_tokens, tgt_tokens, token_cmp, stats, is_stats_by
     stats_true = dict()
     stats_false = dict()
     stats_falsetrue = dict()
+    stats_random = dict()
+    stats_top = defaultdict(dict)
     for name, score in stats.items():
         if is_stats_by_vocab[name]:
             stats_true[name] = score[:max_len][mask, ..., tgt_tokens[:max_len][mask]].tolist()
@@ -697,6 +707,16 @@ def get_stats_distribution(ref_tokens, tgt_tokens, token_cmp, stats, is_stats_by
             else:
                 stats_false[name] = [score[:max_len][ffalse_idx].tolist()]
 
+            if is_stats_by_vocab[name]:
+                values, indices = torch.topk(score[:max_len][ffalse_idx], MAX_TOP_TOKEN, dim=-1)
+                for kth in TOP_TOKENS_LIST:
+                    stats_top[kth][name] = [values[..., kth - 1].tolist()]
+
+            if is_stats_by_vocab[name]:
+                stats_random[name] = [score[:max_len][ffalse_idx][..., random_token].tolist()]
+            else:
+                stats_random[name] = [score[:max_len][ffalse_idx].tolist()]
+
 
     if ffalse_idx < max_len:
         for name, score in stats.items():
@@ -706,11 +726,13 @@ def get_stats_distribution(ref_tokens, tgt_tokens, token_cmp, stats, is_stats_by
             stats_falsetrue[name] = [score[:max_len][ffalse_idx][..., ref_tokens[ffalse_idx]].tolist()]
 
     stats_true['tokens'] = tgt_tokens[:max_len][mask].tolist()
+    stats_true['missclassification'] = (~in1d(tgt_tokens[:max_len][mask], ref_tokens)).tolist()
     if ffalse_idx < max_len:
         stats_false['tokens'] = [tgt_tokens[:max_len][ffalse_idx].tolist()]
         stats_falsetrue['tokens'] = [ref_tokens[:max_len][ffalse_idx].tolist()]
+        stats_random['tokens'] = [random_token]
         
-    return stats_true, stats_false, stats_falsetrue
+    return stats_true, stats_false, stats_falsetrue, stats_random, stats_top
 
 
 def get_translation_stats(tgt_tokens, all_tokens, all_bbsz_idx, all_scores, all_stats, blacklist=None):
@@ -738,7 +760,7 @@ def get_translation_stats(tgt_tokens, all_tokens, all_bbsz_idx, all_scores, all_
     return torch.stack(tscores), processed_stats
 
 
-def get_wrong_suff_stats_distribution(ref_tokens, tgt_tokens, all_stats, is_stats_by_vocab):
+def get_wrong_suff_stats_distribution(ref_tokens, tgt_tokens, all_stats, is_stats_by_vocab, blacklist=None):
     ref_len = ref_tokens.shape[0]
     tgt_len = tgt_tokens.shape[0]
     max_len = min(ref_len, tgt_len)
@@ -763,6 +785,8 @@ def get_wrong_suff_stats_distribution(ref_tokens, tgt_tokens, all_stats, is_stat
 
     stats = dict()
     for name, score in all_stats.items():
+        if (blacklist is not None) and (key in blacklist):
+            continue
         if is_stats_by_vocab[name]:
             stats[name] = score[~mask, ..., tgt_tokens[~mask]].tolist()
         else:
@@ -770,6 +794,7 @@ def get_wrong_suff_stats_distribution(ref_tokens, tgt_tokens, all_stats, is_stat
 
     stats['tokens'] = tgt_tokens[~mask].tolist()
     stats['is_true'] = true_mask[~mask].tolist()
+    stats['missclassification'] = (~in1d(tgt_tokens[~mask], ref_tokens)).tolist()
 
     return stats
 
@@ -842,6 +867,7 @@ models, model_args = utils.load_ensemble_for_inference(
 )
 src_dict = task.source_dictionary
 tgt_dict = task.target_dictionary
+vocab_size = len(tgt_dict.symbols)
 
 
 for model in models:
@@ -892,8 +918,8 @@ global_negative_stats = defaultdict(list)
 global_negative_true_stats = defaultdict(list)
 global_eos_stats = defaultdict(list)
 global_wrong_suff_stats = defaultdict(list)
-global_positive_stats_by_len = defaultdict(dict)
-global_negative_stats_by_len = defaultdict(dict)
+global_random_stats = defaultdict(list)
+global_top_stats = defaultdict(lambda: defaultdict(list))
 for batch in progress:
     nsentences = batch['nsentences']
     for i in tqdm.tqdm(range(nsentences)):
@@ -913,9 +939,15 @@ for batch in progress:
             with_stats=True
         )
 
+        # blacklist = None
+        blacklist = [
+            'inens_probs_dist',
+            'softmax_probs',
+        ]
+
         tgt_tokens = translations[0][0]['tokens'].cpu()
         tgt_len = tgt_tokens.shape[0]
-        probs, all_stats = get_translation_stats(tgt_tokens, all_tokens, all_bbsz_idx, all_scores, all_stats)
+        probs, all_stats = get_translation_stats(tgt_tokens, all_tokens, all_bbsz_idx, all_scores, all_stats, blacklist)
         all_stats['prob'] = probs
 
         is_score_by_vocab = {
@@ -930,19 +962,21 @@ for batch in progress:
             'softmax_probs': False,
         }
 
+
         
-        positive_stats, negative_stats, negative_true_stats = get_stats_distribution(
+        positive_stats, negative_stats, negative_true_stats, random_stats, top_stats = get_stats_distribution(
             ref_tokens,
             tgt_tokens,
             lambda x, y: x == y,
             all_stats,
-            is_score_by_vocab
+            is_score_by_vocab,
+            vocab_size,
         )
         wrong_suff_stats = get_wrong_suff_stats_distribution(
             ref_tokens,
             tgt_tokens,
             all_stats,
-            is_score_by_vocab
+            is_score_by_vocab,
         )
 
         for key in positive_stats:
@@ -956,6 +990,11 @@ for batch in progress:
 
         for key in wrong_suff_stats:
             global_wrong_suff_stats[key].extend(wrong_suff_stats[key])
+        for key in random_stats:
+            global_random_stats[key].extend(random_stats[key])
+        for key in top_stats:
+            for score in top_stats[key]:
+                global_top_stats[key][score].extend(top_stats[key][score])
     break
 
 
@@ -968,3 +1007,7 @@ with open(os.path.join(log_dir, 'negative_true_stats.json'), 'w') as stream_outp
     json.dump(global_negative_true_stats, stream_output)
 with open(os.path.join(log_dir, 'wrong_suff_stats.json'), 'w') as stream_output:
     json.dump(global_wrong_suff_stats, stream_output)
+with open(os.path.join(log_dir, 'random_stats.json'), 'w') as stream_output:
+    json.dump(global_random_stats, stream_output)
+with open(os.path.join(log_dir, 'top_stats.json'), 'w') as stream_output:
+    json.dump(global_top_stats, stream_output)
