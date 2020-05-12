@@ -58,13 +58,42 @@
 		machine translation, uncertainty estimation, beam search, larger beam size problem, model uncertainty
 		
 	\section{Introduction}
-	The task of machine translation is to provide a sentence equivalent in meaning in the target language for the original sentence in the source language. Let $e_1, \dots, e_n$ be a sequence of input sentence tokens' vector representation in the source language. The machine translation model is required to build a sequence of tokens $f_1, \dots, f_n$ in the target language, moreover, in this language, this sequence must have the original meaning.
+	Note that in the example, some features of the model lead to a bad translation. Our model gave low probable in general predictions as a result under the influence of certain factors. \textit{Uncertainty} can cause such phenomena, in particular \textit{model uncertainty}, the uncertainty of predictions caused by the model. What if we can construct some probability measure on the space of output sentences $f_1, \dots, f_m$. In this case, we will be able to estimate in total how much it is typical to get a particular prediction and adjust the output of the model. The task of explicitly or implicitly constructing such a distribution on outputs is called \textit{uncertainty estimation}.
+	
+	There are articles that consider different types of uncertainties and their impact on beam search. In this paper, we investigate the influence of model uncertainty on the beam problem. We also investigate the applicability of the uncertainty estimation methods in the neural machine translation problem and their impact on the effectiveness of beam search.
+	
+	\section{Machine Translation}
+	\subsection{Preliminary}
+		The task of machine translation is to provide a sentence equivalent in meaning in the target language for the original sentence in the source language. Let $e_1, \dots, e_n$ be a sequence of input sentence tokens' vector representation in the source language. The machine translation model is required to build a sequence of tokens $f_1, \dots, f_m$ in the target language, moreover, in this language, this sequence must have the original meaning.
 	
 	Most modern neuromachine translation models follow the paradigm \bibref{seq2seq}{Sutskever et al.}{2014} (seq2seq). Seq2seq models often consist of two recurrent neural networks or groups of networks. One network that processes input tokens is called \textit{encoder}, the second network that builds output predictions is called \textit{decoder}. The encoder task is to encode the input sequence into some hidden representation $h_1, \dots, h_p$, which is fed to the decoder as hidden initialization before building the output prediction. The decoder output is a vector set $\{(p_{i1}, \dots, p_{id})\}_{i=1}^{m}$, where $d$ - target language dictionary power, $m$ - maximum possible prediction sequence length, $p_{ij}$ - the model's confidence that the $i$th token of the predicted sentence will be the $j$th token from the target language dictionary. As a result, the translation model builds a "probability distribution" in the space of the cartesian product of the target dictionary.
 
 	The simplest and most obvious way to build a prediction (final translation) is to select the token that the model is most confident in at each step. If $f_1, \dots, f_m$ is a sequence of model hypotheses' tokens, then $f_i := argmax \, \{p_{ij}\}_{j=1}^{d}$. However, for an optimal prediction $f_1^*, \dots, f_m^*$ it is not always true that in terms of model confidence $f_i^* = argmax \, \{p_{ij}\}_{j=1}^{d}$. This phenomenon is also related to the beam problem, which we will discuss in more detail in the following chapters.
+	\subsection{Statement}
+	В первую очередь, определим понятие эмбединги. Эмбединги - это некоторые численные вектора специального векторного пространства, которые взаимнооднозначно соответствуют словам из словаря некоторого языка. Тогда рассмотрим следующую постановку.
+	Пусть $\textbf{x}, \textbf{r}$ - эмбединги, соответствующие входным и выходным токенам $\textbf{e}, \textbf{f}$, соответственно. 
+	Тогда модель машинного перевода задает следующую куммулятивную вероятность:
+	\begin{equation}
+		P(\textbf{y} | x, \theta) = P(y_1 | x, \theta) \prod_{i=2}^{L} P(y_i | y_{<i}, \textbf{x}, \theta)
+	\end{equation}
 	
-	Beam search is used as a more effective solution for building predictions. Its main idea is that instead of selecting the most likely token at each step, we require the model to store $b$ the most likely predictions' prefixes $f_{b1}, \dots, f_{bt}$. Using this approach, we do not choose the locally optimal token, but in general the optimal prefix, which will increase the chances of building a correct prediction.
+	Здесь $\textbf{y}$ - некоторая последовательность токенов, которая соответствует переводу с точки зрения модели. $y_{<i}=(y_1, \dots, y_{i - 1})$, а $\theta$ - параметры модели машинного перевода, настраиваемые в процессе обучения.
+	
+	На основе данных вероятностей модель в дальнейшем выбирает по некоторому правилу итоговую последовательность эмбедингов  $\textbf{y} = (y_1, \dots, y_m)$ и по ним однозначно восстанавливает итоговые токены $\textbf{h} = (h_1, \dots, h_m)$. Как мы уже рассмотрели ранее, в качестве решающего правила может выступать жадный выбор, т.е. на каждой итерации выбирается эмбединг с максимальной условной вероятностью $P(y_i | y_{<i}, \textbf{x}, \theta)$, либо в качестве решающего правила можно использовать некоторый другой подход, например, beam search, который мы рассмотрим далее.
+	
+	Для простоты в силу взаимнооднозначности далее под токенами будем понимать эмбединги токенов и будем неявно подразумевать перевод в пространство итоговых токенов. Поэтому конечными нашими обозначениями будут: $X = (x_1, \dots, x_n)$ - множество всех предложений на исходном языке, $R = (r_1, \dots, r_n)$ - множество истинных переводов на целевом языке. $Y = (y_1, \dots, y_n)$ - множество переводов с точки зрения нашей модели.
+	
+	Наиболее часто встречаемой мерой качества в задаче машинного перевода является BLEU. 
+	
+	Пусть модель для некоторой пары предложений $\textbf{x}, \textbf{r}$ построила перевод $\textbf{y}$.
+	\begin{equation}
+		BLEUK = \min\Big(1, \, \frac{|\textbf{y}|}{|\textbf{r}|}\Big) \big(\prod_{i=1}^{K} precision_i\big)^{\frac1K}
+	\end{equation}
+	
+	Здесь под $precision_i$ понимается $precision$ посчитанный по всем i-граммам.
+	\section{Beam Search}
+	\subsection{Motivation}
+	Beam search is used as a more effective solution for building predictions. Its main idea is that instead of selecting the most likely token at each step, we require the model to store $b$ the most likely predictions' prefixes $y_{b1}, \dots, y_{bt}$. Using this approach, we do not choose the locally optimal token, but in general the optimal prefix, which will increase the chances of building a correct prediction.
 
 	It is easy to understand that with the increase of $b$ (this hyperparameter is called \textit{beam size}), the quality of the prediction should also increase, since the number of greedy searches is growing. In practice, it turns out that in neuromachine translation, starting from a certain threshold, the quality decreases significantly with increasing beam size. An illustration of this phenomenon can be seen in Fig. 1. The model used in the experiment is described in the  \bibref{fconv}{Jonas Gehring}{2017}. 
 	
@@ -75,17 +104,11 @@
 		\center{\caption{Convolutional Sequence to sequence model BLEU4 evaluation by beam size. Training set: \textit{WMT'14 English-France}}}
 	\end{figure}
 	
-	This problem is called \textit{larger beam size problem}. Next, we will look at the possible causes of this phenomenon in details, until we note that the following situation is not excluded. Suppose on $k_1$ iteration step beam search stores the prefix $f_1, \dots, f_{k_1}$ among $b$ locally optimal, which has the least model confidence among all $b$ prefixes. Let this prefix be constructed in such a way that on the next steps model will find a suffix that complements it in such a way that the final sentence is considered the optimal translation from the model's point of view. There are cases when such a translation can be incorrect. Consider following example. Let us train a translation model on a fairy tale corpus, the source language is Russian and the target language is English. Consider the following sentence: \textit{Жульничество на экзамене однажды может закончиться проблемами}. Suppose following sentence is a model prediction: \textit{At the examination once upon a time}. It is obvious that the meaning of the translation does not correspond to the original sentence, but this sentence is optimal from the point of view of our hypothetical model. Beam problem can cause such situations. The prefix \textit{At the examination once} may have been included in a broad beam search and have been earned a low model confidence. However, due to the fact that we train on a large corpus of fairy tales, where there are many examples of sentences like \textit{Once upon a time...} our model decides that after \textit{Once} it is probably to continue prefix with suffix \textit{upon a time}, which lead to a bad translation.
-	
-	Note that in the example, some features of the model lead to a bad translation. Our model gave low probable in general predictions as a result under the influence of certain factors. \textit{Uncertainty} can cause such phenomena, in particular \textit{model uncertainty}, the uncertainty of predictions caused by the model. What if we can construct some probability measure on the space of output sentences $f_1, \dots, f_m$. In this case, we will be able to estimate in total how much it is typical to get a particular prediction and adjust the output of the model. The task of explicitly or implicitly constructing such a distribution on outputs is called \textit{uncertainty estimation}.
-	
-	There are articles that consider different types of uncertainties and their impact on beam search. In this paper, we investigate the influence of model uncertainty on the beam problem. We also investigate the applicability of the uncertainty estimation methods in the neural machine translation problem and their impact on the effectiveness of beam search.
-	
-	\section{Beam Search}
+	This problem is called \textit{larger beam size problem}. Next, we will look at the possible causes of this phenomenon in details, until we note that the following situation is not excluded. Suppose on $k_1$ iteration step beam search stores the prefix $y_1, \dots, y_{k_1}$ among $b$ locally optimal, which has the least model confidence among all $b$ prefixes. Let this prefix be constructed in such a way that on the next steps model will find a suffix that complements it in such a way that the final sentence is considered the optimal translation from the model's point of view. There are cases when such a translation can be incorrect. Consider following example. Let us train a translation model on a fairy tale corpus, the source language is Russian and the target language is English. Consider the following sentence: \textit{Жульничество на экзамене однажды может закончиться проблемами}. Suppose following sentence is a model prediction: \textit{At the examination once upon a time}. It is obvious that the meaning of the translation does not correspond to the original sentence, but this sentence is optimal from the point of view of our hypothetical model. Beam problem can cause such situations. The prefix \textit{At the examination once} may have been included in a broad beam search and have been earned a low model confidence. However, due to the fact that we train on a large corpus of fairy tales, where there are many examples of sentences like \textit{Once upon a time...} our model decides that after \textit{Once} it is probably to continue prefix with suffix \textit{upon a time}, which lead to a bad translation.
 	\subsection{Method definition}
 	Suggest $k$-long prediction prefix:
 	\begin{equation}
-		f_{:k}^{i} := (f_1^{i}, \dots, f_k^{i}) \text{, \,\, where i - beam search branch index}
+		y_{<k}^{i} := (y_1^{i}, \dots, y_k^{i}) \text{, \,\, where i - beam search branch index}
 	\end{equation}
 	
 	Let us introduce following iterative method:
@@ -93,16 +116,16 @@
 	\begin{enumerate}
 		\item Let us submit a special token of the beginning of the sentence and the encoder hidden state to the decoder input. We get a certain tokens' confidence vector $(p_1^{00}, \dots, p_d^{00})$, where $d$ - target dictionary power.
 		
-		\item Take tokens whose confidence values are $beam$ highest among $ (p_1^{00}, \dots, p_d^{00})$. Here $beam$ is the hyperparameter of the method and is called \textit{beam size}. As a result, we will remember: $f_{:1}^1, \dots, f_{:1}^{beam}$. 
+		\item Take tokens whose confidence values are $beam$ highest among $ (p_1^{00}, \dots, p_d^{00})$. Here $beam$ is the hyperparameter of the method and is called \textit{beam size}. As a result, we will remember: $y_{<1}^1, \dots, y_{<1}^{beam}$. 
 		
-		\item In the next iteration, we will submit to the decoder $(f_1^{00}, \dots, f_d^{00})$ as inputs and the hidden state of the previous step. For each token, we get our output distribution $(p_1^{1i}, \dots, p_d^{1i})$ (here $1$ is the iteration number, $i$ is the token number).
-		\item For all token $i \in \overline{1, beam}$ consider $\forall j \in \overline{1, d}: \,\, p(f_{:1}^i) * p_j^{1i}$. We get a set of prefixes of length $2$. Let us choose among all $beam * d$ prefixes $beam$ with the greatest confidence. Remember them: $f_{:2}^1, \dots, f_{:2}^{beam}$
+		\item In the next iteration, we will submit to the decoder $(y_1^{00}, \dots, y_d^{00})$ as inputs and the hidden state of the previous step. For each token, we get our output distribution $(p_1^{1i}, \dots, p_d^{1i})$ (here $1$ is the iteration number, $i$ is the token number).
+		\item For all token $i \in \overline{1, beam}$ consider $\forall j \in \overline{1, d}: \,\, p(f_{:1}^i) * p_j^{1i}$. We get a set of prefixes of length $2$. Let us choose among all $beam * d$ prefixes $beam$ with the greatest confidence. Remember them: $y_{<2}^1, \dots, y_{<2}^{beam}$
 		
 		\item Iteratively, we will continue the operation $\forall k \in \overline{3, m}$. 
 		
-		We will get: $f_ {: k}^1, \dots, f_{:k}^{beam}$
+		We will get: $y_ {<k}^1, \dots, y_{<k}^{beam}$
 		
-		\item As the final prediction select $f_{:m}^i, \dots, f_{:m}^i$ such that its confidence is greatest $\forall i \in \overline{1, beam}$
+		\item As the final prediction select $y_{<m}^i, \dots, y_{<m}^i$ such that its confidence is greatest $\forall i \in \overline{1, beam}$
 	\end{enumerate}
 	
 	In summary, this method stores $beam$ of the "most likely" prefixes at each decoding iteration, in contrast to the naive approach, which greedily selects 1 locally optimal hypothesis at each iteration.
@@ -127,24 +150,24 @@
 	
 	Standard quality functional for a machine translation task is \textit{cross-entropy}:
 	\begin{equation}
-		s(f) = \Sigma_{i=1}^{L}\log p(f_i | f_{:i}), \,\,\, \text{where $L$ - translation length}
+		s(\textbf{y}) = \sum_{i=1}^{L}\log p(y_i | y_{<i}, \textbf{x}, \theta), \,\,\, \text{where $L$ - translation length}
 	\end{equation}
 	
 	The authors consider the following quality functional adjustments as solutions:
 	\begin{enumerate}
 		\item Length normalization
 		\begin{equation}
-			s'(f) = s(f) / L
+			s'(\textbf{y}) = s(\textbf{y}) / L
 		\end{equation}
 		
 		\item \bibref{gnmt}{Google's NMT system}{2016}. Length normalization. 
 		\begin{equation}
-			s'(f) = s(f) \Big/ \frac{(5 + L) ^ \alpha}{(5 + 1) ^ \alpha}
+			s'(\textbf{y}) = s(\textbf{y}) \Big/ \frac{(5 + L) ^ \alpha}{(5 + 1) ^ \alpha}
 		\end{equation}
 		
 		\item Word reward
 		\begin{equation}
-			s'(f) = s(f) + \gamma L
+			s'(\textbf{y}) = s(\textbf{y}) + \gamma L
 		\end{equation}
 	\end{enumerate}
 	
@@ -165,7 +188,7 @@
 	
 	Consider an article that offers a different method for solving the problem \bibref{calibration}{Kumar et al.}{2019}.
 
-	In this article the beam problem solution is based on the calibration of the probability distribution $p_{it}: = p(f_{i, t} | f_{i,:t})$, here $i$ is the index of the sample example. Before starting the review, let us introduce the definition of "well-calibrated" distribution. Output distribution $p (f_{i, t} | f_{i, :t})$ \textit{well calibrated} if:
+	In this article the beam problem solution is based on the calibration of the probability distribution $p_{it}: = p(y_{i, t} | y_{i,<t})$, here $i$ is the index of the sample example. Before starting the review, let us introduce the definition of "well-calibrated" distribution. Output distribution $p (y_{i, t} | y_{i, <t})$ \textit{well calibrated} if:
 	\[
 		\forall \beta \in [0, 1]: \frac{ | \{ y \in V |\, p(y) = \ beta \} | }{d}=\beta
 	\]
@@ -173,19 +196,19 @@
 	
 	Let us denote calibration metrics \textbf{expected calibration error (ECE)}:
 	
-	Let $\mathbf{x}_i$ reference sentece is $\mathbf{y}_i = (y_{i1}, \dots, y_{im})$.
+	Let $\mathbf{r}_i = (r_{i1}, \dots, r_{im})$ be reference sentece $\mathbf{x}_i$.
 	
-	Model predictions: $\mathbf{f}_{it} := argmax_{f} p(f | f_{i, :t})$.
+	Model predictions: $\mathbf{y}_{it} := argmax_{y} p(y | y_{i, <t})$.
 	
-	$C_{it}(f) := \delta(y_{it} = f)$, where $\delta$ - Kronecker delta.
+	$C_{it}(f) := \delta(r_{it} = y)$, where $\delta$ - Kronecker delta.
 	
 	Let us divide probability space $[0, 1]$ by $M$ equal bins: $I_1, \dots, I_M$.
 	
-	Let $L = \sum_i^N |\mathbf{y}_i|$ be a total output token length.
+	Let $L = \sum_i^N |\mathbf{r}_i|$ be a total output token length.
 	
 	Then:
 	\begin{equation}
-		ECE = \frac1{L}\sum_{b=1}^{M}\Big|\sum_{i, t:\, p(\mathbf{f}_{it}) \in I_b} C_{it}(\mathbf{f}_{it}) - p(\mathbf{f}_{it})\Big|
+		ECE = \frac1{L}\sum_{b=1}^{M}\Big|\sum_{i, t:\, p(\mathbf{y}_{it}) \in I_b} C_{it}(\mathbf{y}_{it}) - p(\mathbf{y}_{it})\Big|
 	\end{equation}
 	
 	The reasons why the probability distribution calibration can solve problems with beam size follow from the examples we discussed above.
@@ -256,11 +279,41 @@
 	The authors conducted an experiment, the results of which can be seen in Fig. 5, in which WMT'17 added explicitly replaced random examples from the training with copies of the original sentence. It is clearly seen that this leads to quality degradation with increasing noise. Moreover, models with a larger beam size suffer more from extrinsic uncertainty, which confirms the thesis put forward in the previous paragraph.
 	
 	The authors suggest two approaches to preparing data for training. First, they remove train examples, which has low score in a model trained on the news-commentary part of WMT'17 En-De point of view (filtered). Second, they restrict beam search hypotheses, which has BLEU with source sentence more than 50\% (no copy). The results can be seen in Fig. 6. They are fully consistent with the conclusions obtained earlier.
+	\subsection{Ways of uncertainty estimation}
+	В данном разделе мы обратимся к статье \bibref{uncertainty}{Malinin et al.}{2020}, в которой рассматриваются различные подходы к оценке неопределенности for structured predictions и некоторые способы применения. В данном разделе мы будем рассматривать задачи, в которой решения описываются вероятностной моделью  (1).
+	
+	Автор выделяет два основных подхода к оценке неопределенностей for structured predictions: sequence-level and token-level. В случае sequence-level неопределенность оценивается в пространстве итоговых предсказаний (декартово произведение словаря). В случае token-level неопределенность оценивается на уровне отдельных токенов последовательностей (пространство словаря). Оценивание неопределенностей на разных уровнях позволяет решать разного рода задачи.
+	
+	Главный иструмент оценки неопределенности в статье - использование ансамбля моделей из некоторого параметрического семейства моделей $\mathcal{F}(\theta)$, где $q(\theta)$ - эмпирическая оценка априорного распределения моделей $p(\theta)$. Если говорить неформально, то предпосылками для использования ансамблей является следующая идея. Если множество различных моделей из одного семейства голосуют за один и тот же вердикт, то с высокой вероятностью мы можем доверять данному вердикту. В обратной ситуации, если модели не согласованы в своих предсказаниях, то данное наблюдение может стать индикатором неопределенности, в частности это может свидетельствовать о том, что представленная задача выбивается из общего паттерна данных, которые модели смогли в своей общности обучить.
+	
+	Отправной точкой ввода оценок неопределенностей в статье является следующее соотношение:
+	\begin{equation}
+		\underbrace{\mathcal{I}[y, \theta|\textbf{x}, \mathcal{D}]}_\text{Knowledge Uncetainty}
+		= 
+		\underbrace{\mathcal{H}[P(y | \textbf{x}, \mathcal{D})]}_\text{Total Uncertainty}
+		-
+		\underbrace{\mathbb{E}_{q(\theta)}[\mathcal{H}[P(y| \textbf{x}, \theta)]]}_\text{Data Uncertainty}
+	\end{equation}
+	
+	Здесь под $\mathcal{H}$ понимается энтропия по Шеннону, а под $\mathcal{I}$ - mutual information.
+	
+	Так же knowledge uncertainty можно оценивать другой метрикой, предложенной в статье, которая коррелирует с уже рассмотренной:
+	\begin{equation}
+		\mathcal{K}[y, \theta] = \mathbb{E}_{q(\theta)q(\hat{\theta})}[
+			\mathrm{KL}[P(y|\textbf{x}, \theta) || P(y|\textbf{x}, \hat{\theta})
+		]
+	\end{equation}
+	
+	Мы рассмотрели только малую часть от предложенных автором метрик неопределенности, с полным исследованием можно ознакомиться в оригинальной статье. Более подробно вышеописанные метрики мы рассмотрим в последующих главах.
+	
+	Малинин в своей работе приводит некоторые эксперименты, демонстрирующие эффективность оценки неопределенности данными методами на различных уровнях для задачи ASR. В частности, эксперименты: out of distribution detection and misclassification detection. Однако, в данной статье плохо рассматривается оценка неопределенности для задачи машинного перевода.
+	\section{Overview summary}
+	Мы рассмотрели workaround работы. В данной работе мы планируем изучить корреляцию uncertainty и ошибки перевода. В частности, хотим выяснить как можно улучшить качество, добавляя в модель некоторое знание о неопределенности ее предсказания. В силу того, что token-level estimation для задачи машинного перевода изучен плохо, мы будем рассматривать именно этот подход. Так же постараемся выяснить корреляцию оценки неопределенности и larger beam size problem.
 
 \section{Preliminary}
 	Напомним workaround нашей работы.
 	
-	Пусть $X = (x^1, \dots, x^N)$, $Y = (y^1, \dots, y^N)$ параллельный корпус предложений, где $X$ соответствует исходному языку, а $Y$ - целевому (тот, на который мы переводим). Итоговый перевод некоторого предложения $x$ строится по следующей вероятностной модели (наша модель нейромашинного перевода): 
+	Пусть $X = (x^1, \dots, x^N)$, $R = (r^1, \dots, r^N)$ параллельный корпус предложений, где $X$ соответствует исходному языку, а $R$ - целевому (тот, на который мы переводим). Итоговый перевод некоторого предложения $x$ строится по следующей вероятностной модели (наша модель нейромашинного перевода): 
 	\begin{equation*}
 		P(\textbf{y} | x, \theta) = P(y_1 | x, \theta) \prod_{i=2}^{L} P(y_i | y_{<i}, x, \theta)
 	\end{equation*}
@@ -272,9 +325,9 @@
 		P(y_i | y_{<i}, x, \mathcal{D}) = \frac1{K} \sum_{j=1}^{K}P(y_i | y_{<i}, x, \theta_j)
 	\end{equation*}
 	
-	В нашем случае $K=5$. Каждая модель в ансамбле была обучена на общих данных $X, Y$, но из разных точек инициализации.
+	В нашем случае $K=5$. Каждая модель в ансамбле была обучена на общих данных $X, R$, но из разных точек инициализации.
 	
-	В качестве обучающей, тестовой, валидационной  выборок для моделей трансформера был взят корпус \textit{IWSLT`14 De-En}. Целевая метрика данной работы - \textit{BLEU}.
+	В качестве обучающей, тестовой, валидационной  выборок для моделей трансформера был взят корпус \textit{IWSLT`14 De-En}. Целевая метрика данной работы - \textit{BLEU4}.
 	
 	Итоговые графики результатов можно видеть на изображении 7.
 	
@@ -310,19 +363,19 @@
 	
 	В нашей работе мы решили явно проверить, можно ли с помощью некоторых оценок неопределенностей обнаружить ошибочное предсказания очередного токена.
 	
-	Структура эксперимента будет следующей. Мы рассматриваем корпус предложений $X, Y$. Пусть $H = (h^1, \dots, h^N)$ - соответствующие переводы, построенные ансамблем. Пусть $y_{i}, h_{i}$ - $ith$ токены истинного перевода и перевода модели, соответственно. Введем следующий индикатор корректности ith токена в переводе:
+	Структура эксперимента будет следующей. Мы рассматриваем корпус предложений $X, R$. Пусть $y = (y^1, \dots, y^N)$ - соответствующие переводы, построенные ансамблем. Пусть $r_{i}, y_{i}$ - $ith$ токены истинного перевода и перевода модели, соответственно. Введем следующий индикатор корректности ith токена в переводе:
 	\begin{equation}
-		correct(h^{i}, \textbf{y}) := [h^{i} \in \textbf{y}]
+		correct(y^{i}, \textbf{r}) := [y^{i} \in \textbf{r}]
 	\end{equation}
 	
 	Данная индикаторная величина будет нашей целевой функцией, которую мы хотим предсказывать по оценке неопределенности. Введем теперь \textit{total uncertainty estimation}:
 	\begin{equation}
-		TU(h_i) := \mathcal{H}[P(h_i|h_{<i}, \mathcal{D})]
+		TU(y_i) := \mathcal{H}[P(y_i|y_{<i}, \mathcal{D})]
 	\end{equation}
 	
 	Здесь в качестве $\mathcal{H}$ рассматривается энтропия по Шеннону. Данная метрика не разделяет виды неопределенностей, которые мы рассматривали ранее, она является индикатором для любого проявления. Она показывает насколько вероятностная масса итогового ансамбля разрежена по токенам словаря.
 	
-	Тогда для каждого токена $h_i^j \in H$ мы имеем целевывые функции $correct(h_i^j, y^j)$ и оценки неопределенностей $TU(h_i^j)$. Отнормируем на $[0, 1]$ оценки неопределенностей и получим некоторую модель, предсказывающую уверенность в ошибочности предсказания конкретного токена.
+	Тогда для каждого токена $y_i^j \in H$ мы имеем целевывые функции $correct(y_i^j, r^j)$ и оценки неопределенностей $TU(y_i^j)$. Отнормируем на $[0, 1]$ оценки неопределенностей и получим некоторую модель, предсказывающую уверенность в ошибочности предсказания конкретного токена.
 	
 	\begin{figure}[t]
 		\center{
@@ -340,7 +393,7 @@
 	
 	Давайте теперь проведем аналогичные эксперименты для нового индикатора корректности:
 	\begin{equation}
-		\delta(h^i, \textbf{y}) := [h^i = y^i]
+		\delta(y^i, \textbf{r}) := [y^i = r^i]
 	\end{equation}
 	
 		
@@ -348,7 +401,7 @@
 		\center{
 			\includegraphics[width=0.6\textwidth]{dummy.png}
 		}
-		\center{\caption{PR-curve for misclassification detection by TU. $\delta(h^i, \textbf{y})$}}
+		\center{\caption{PR-curve for misclassification detection by TU. $\delta(y^i, \textbf{r})$}}
 	\end{figure}	
 	И рассмотрим результаты на изображении 10. В этот раз наблюдаются очень высокие показатели. Однако, вызваны они не тем, что мы подобрали более релевантный индикатор корректности, а тем, что этот индикатор более строго определяет понятие ошибки. Теперь более вероятно встретить мисклассификацию и как следствие оценке неопределенностей легче стало с этим справляться. Поэтому данные результаты не очень resonable. Это легко видеть, если рассмотреть roc на изображении 11. Наша эмпирическая модель не сильно лучше справляется с задачей, чем случайный алгоритм. Важно заметить, после того как мы усилили условие корректности, доля положительного класса сильно выросла (0.76 против 0.26 в предыдущей постановке). Т.е. в данной постановке мы можем доверять ROC, поскольку положительный класс преобладает и как следствие баланс классов не ухудшает показатели.
 	
@@ -360,7 +413,7 @@
 		\center{
 			\includegraphics[width=0.6\textwidth]{dummy.png}
 		}
-		\center{\caption{ROC for misclassification detection by TU. $\delta(h^i, \textbf{y})$}}
+		\center{\caption{ROC for misclassification detection by TU. $\delta(y^i, \textbf{r})$}}
 	\end{figure}
 	
 \section{Корректность эксперимента}
