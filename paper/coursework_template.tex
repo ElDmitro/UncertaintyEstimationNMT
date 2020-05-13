@@ -16,6 +16,8 @@
 \usepackage{listings}
 \usepackage[colorlinks, linkcolor=blue, urlcolor=blue]{hyperref}
 \usepackage{indentfirst}
+\usepackage{float}
+\usepackage{wrapfig}
 \graphicspath{{images/}}
 
 
@@ -52,16 +54,16 @@
 	\newpage
 	
 	\section{Annotation}
-	In the field of machine translation \textit{beam search} is the one of the main methods for improving the quality of the final prediction. However, when using neural network technologies, there is a problem of larger beam size, which limits the richness of beam search. Problem solution will significantly improve the quality of predictions by considering more hypotheses in the process of making predictions. Many factors in the model infrastructure can cause the appearance of the beam problem. In this paper we explore the \textit{larger beam size problem} and its correlation with \textit{model uncertainty}. We also study the propensity of models with an uncertainty estimation to cause beam problem.
-	
+	In machine translation, there is a significant problem of improving the quality of models. There are now many studies on the topic of uncertainty estimation. However, there is no almost works on uncertainty estimation in neural machine translation. In this paper, we will study the relationship between uncertainty and the quality of machine translation models.
 	\section{Keywords}
-		machine translation, uncertainty estimation, beam search, larger beam size problem, model uncertainty
+		machine translation, uncertainty estimation, beam search, larger beam size problem, model uncertainty, data uncertainty
 		
 	\section{Introduction}
-	Note that in the example, some features of the model lead to a bad translation. Our model gave low probable in general predictions as a result under the influence of certain factors. \textit{Uncertainty} can cause such phenomena, in particular \textit{model uncertainty}, the uncertainty of predictions caused by the model. What if we can construct some probability measure on the space of output sentences $f_1, \dots, f_m$. In this case, we will be able to estimate in total how much it is typical to get a particular prediction and adjust the output of the model. The task of explicitly or implicitly constructing such a distribution on outputs is called \textit{uncertainty estimation}.
+	Nowdays machine translation is one of the most popular areas of machine learning. There are two fundamental approaches to solving this problem: statistical and neural machine translation. In the first case, classical approaches of classical statistical machine learning are used, in the second - modern technologies of deep learning. As in any field, there are a lot of actual unresolved problems in machine translation. In particular, in contrast to statistical machine translation, in neural machine translation  quality of prediction degradation with an increase in the width of the hypothesis search appears.
 	
-	There are articles that consider different types of uncertainties and their impact on beam search. In this paper, we investigate the influence of model uncertainty on the beam problem. We also investigate the applicability of the uncertainty estimation methods in the neural machine translation problem and their impact on the effectiveness of beam search.
+	Another relatively modern area in machine learning is uncertainty estimation. Using the methods of uncertainty estimation it is possible to build metrics for confidence in predictions of models. There are several types of uncertainties. Some of them are caused by certain artifacts in the data, while others are caused by the model's ability to understand the proposed data. In any case, the uncertainty estimates indicate that the model is doubtful about making certain predictions.	
 	
+	In this paper, we study the correlation between machine translation model errors and uncertainties in both data and models. We propose an approach to using uncertainty estimation as a way to improve the quality of the model or architecture.
 	\section{Machine Translation}
 	\subsection{Preliminary}
 		The task of machine translation is to provide a sentence equivalent in meaning in the target language for the original sentence in the source language. Let $e_1, \dots, e_n$ be a sequence of input sentence tokens' vector representation in the source language. The machine translation model is required to build a sequence of tokens $f_1, \dots, f_m$ in the target language, moreover, in this language, this sequence must have the original meaning.
@@ -70,27 +72,27 @@
 
 	The simplest and most obvious way to build a prediction (final translation) is to select the token that the model is most confident in at each step. If $f_1, \dots, f_m$ is a sequence of model hypotheses' tokens, then $f_i := argmax \, \{p_{ij}\}_{j=1}^{d}$. However, for an optimal prediction $f_1^*, \dots, f_m^*$ it is not always true that in terms of model confidence $f_i^* = argmax \, \{p_{ij}\}_{j=1}^{d}$. This phenomenon is also related to the beam problem, which we will discuss in more detail in the following chapters.
 	\subsection{Statement}
-	В первую очередь, определим понятие эмбединги. Эмбединги - это некоторые численные вектора специального векторного пространства, которые взаимнооднозначно соответствуют словам из словаря некоторого языка. Тогда рассмотрим следующую постановку.
-	Пусть $\textbf{x}, \textbf{r}$ - эмбединги, соответствующие входным и выходным токенам $\textbf{e}, \textbf{f}$, соответственно. 
-	Тогда модель машинного перевода задает следующую куммулятивную вероятность:
+	First of all, let's define the concept of \textit{embeddings}. Embeddinges are some numerical vectors of a special vector space that bijective correspond to words from the dictionary of a certain language. Then consider the following statement.
+Let $\textbf{x}, \textbf{r}$ be embeddings corresponding to the input and output tokens $\textbf{e}, \textbf{f}$, respectively.
+Then the machine translation model sets the following cumulative probability:
 	\begin{equation}
 		P(\textbf{y} | x, \theta) = P(y_1 | x, \theta) \prod_{i=2}^{L} P(y_i | y_{<i}, \textbf{x}, \theta)
 	\end{equation}
 	
-	Здесь $\textbf{y}$ - некоторая последовательность токенов, которая соответствует переводу с точки зрения модели. $y_{<i}=(y_1, \dots, y_{i - 1})$, а $\theta$ - параметры модели машинного перевода, настраиваемые в процессе обучения.
+	Here $\textbf{y}$ is a certain sequence of tokens that corresponds to the translation from the model's point of view. $y_{<i}=(y_1, \dots, y_{i - 1})$ , and $\theta$ is machine translation model parameters that are configured during training.
+
+	Based on these probabilities, a model selects the final embedding sequence $\textbf{y} = (y_1, \dots, y_m)$ and it bijective restores the final tokens $\textbf{h} = (h_1, \dots, h_m)$. As we discussed earlier, the deciding rule can be a greedy choice, i.e. at each iteration, an embedding is selected with the maximum conditional probability of $P (y_i | y_{<i}, \textbf{x}, \theta)$. Some other approach can be used as the deciding rule, such as beam search, which we will discuss later.
 	
-	На основе данных вероятностей модель в дальнейшем выбирает по некоторому правилу итоговую последовательность эмбедингов  $\textbf{y} = (y_1, \dots, y_m)$ и по ним однозначно восстанавливает итоговые токены $\textbf{h} = (h_1, \dots, h_m)$. Как мы уже рассмотрели ранее, в качестве решающего правила может выступать жадный выбор, т.е. на каждой итерации выбирается эмбединг с максимальной условной вероятностью $P(y_i | y_{<i}, \textbf{x}, \theta)$, либо в качестве решающего правила можно использовать некоторый другой подход, например, beam search, который мы рассмотрим далее.
+	For simplicity, due to bujection, we will further understand tokens as tokens embedding, and we will implicitly mean transferring to the final tokens space. Therefore, our final notation will be: $X = (x_1, \dots, x_n)$ - set of all sentences in the source language, $R = (r_1, \dots, r_n)$ - set of reference translations in the target language. $Y = (y_1, \dots, y_n)$ - a set of translations from the point of view of our model.
+
+	The most common quality measure in a machine translation problem is BLEU.
 	
-	Для простоты в силу взаимнооднозначности далее под токенами будем понимать эмбединги токенов и будем неявно подразумевать перевод в пространство итоговых токенов. Поэтому конечными нашими обозначениями будут: $X = (x_1, \dots, x_n)$ - множество всех предложений на исходном языке, $R = (r_1, \dots, r_n)$ - множество истинных переводов на целевом языке. $Y = (y_1, \dots, y_n)$ - множество переводов с точки зрения нашей модели.
-	
-	Наиболее часто встречаемой мерой качества в задаче машинного перевода является BLEU. 
-	
-	Пусть модель для некоторой пары предложений $\textbf{x}, \textbf{r}$ построила перевод $\textbf{y}$.
+	Let the model for some pair of sentences be $\textbf{x}, \textbf{r}$ built a translation of $\textbf{y}$.
 	\begin{equation}
 		BLEUK = \min\Big(1, \, \frac{|\textbf{y}|}{|\textbf{r}|}\Big) \big(\prod_{i=1}^{K} precision_i\big)^{\frac1K}
 	\end{equation}
-	
-	Здесь под $precision_i$ понимается $precision$ посчитанный по всем i-граммам.
+
+	Here, $precision_i$ means $precision$ calculated for all i-grams.
 	\section{Beam Search}
 	\subsection{Motivation}
 	Beam search is used as a more effective solution for building predictions. Its main idea is that instead of selecting the most likely token at each step, we require the model to store $b$ the most likely predictions' prefixes $y_{b1}, \dots, y_{bt}$. Using this approach, we do not choose the locally optimal token, but in general the optimal prefix, which will increase the chances of building a correct prediction.
@@ -269,24 +271,23 @@
 		\center{\caption{Translation  quality  of  models  trained  on  WMT’17 English-German news-commentary data with added synthetic copynoise in the training data (x-axis) tested with various beam sizeson the validation set. This figure is obtained from [9].}}
 	\end{figure}
 	
-	\begin{figure}[t]
+	The authors conducted an experiment, the results of which can be seen in Fig. 5, in which WMT'17 added explicitly replaced random examples from the training with copies of the original sentence. It is clearly seen that this leads to quality degradation with increasing noise. Moreover, models with a larger beam size suffer more from extrinsic uncertainty, which confirms the thesis put forward in the previous paragraph.
+	
+	The authors suggest two approaches to preparing data for training. First, they remove train examples, which has low score in a model trained on the news-commentary part of WMT'17 En-De point of view (filtered). Second, they restrict beam search hypotheses, which has BLEU with source sentence more than 50\% (no copy). The results can be seen in Fig. 6. They are fully consistent with the conclusions obtained earlier.
+	\begin{figure}[H]
 		\center{
 			\includegraphics[width=0.6\textwidth]{unc_beam_meth.png}
 		}
 		\center{\caption{BLEU on newstest2017 as a function of beam width for models trained on all of the WMT’17 En-De training data (original), a filtered version of the training data (filtered) and a small but clean subset of the training data (clean). They also show results when excluding copies as a post-processing step (no copy). This figure is obtained from [9].}}
 	\end{figure}
-	
-	The authors conducted an experiment, the results of which can be seen in Fig. 5, in which WMT'17 added explicitly replaced random examples from the training with copies of the original sentence. It is clearly seen that this leads to quality degradation with increasing noise. Moreover, models with a larger beam size suffer more from extrinsic uncertainty, which confirms the thesis put forward in the previous paragraph.
-	
-	The authors suggest two approaches to preparing data for training. First, they remove train examples, which has low score in a model trained on the news-commentary part of WMT'17 En-De point of view (filtered). Second, they restrict beam search hypotheses, which has BLEU with source sentence more than 50\% (no copy). The results can be seen in Fig. 6. They are fully consistent with the conclusions obtained earlier.
 	\subsection{Ways of uncertainty estimation}
-	В данном разделе мы обратимся к статье \bibref{uncertainty}{Malinin et al.}{2020}, в которой рассматриваются различные подходы к оценке неопределенности for structured predictions и некоторые способы применения. В данном разделе мы будем рассматривать задачи, в которой решения описываются вероятностной моделью  (1).
+	In this section, we will refer to the article \bibref{uncertainty}{Malinin et al.} {2020}, which discusses various approaches to estimating uncertainty for structured predictions and some its applications. In this section, we will consider problems in which solutions are described by the probabilistic model (1).
+
+	The author identifies two main approaches to estimating uncertainties for structured predictions: sequence-level and token-level. In the case of sequence-level, the uncertainty is estimated in the space of final predictions (the Cartesian product of the dictionary). In the case of token-level, the uncertainty is evaluated at the level of individual sequence tokens (the dictionary space). Estimating uncertainties at different levels allows us to solve different types of problems.
 	
-	Автор выделяет два основных подхода к оценке неопределенностей for structured predictions: sequence-level and token-level. В случае sequence-level неопределенность оценивается в пространстве итоговых предсказаний (декартово произведение словаря). В случае token-level неопределенность оценивается на уровне отдельных токенов последовательностей (пространство словаря). Оценивание неопределенностей на разных уровнях позволяет решать разного рода задачи.
-	
-	Главный иструмент оценки неопределенности в статье - использование ансамбля моделей из некоторого параметрического семейства моделей $\mathcal{F}(\theta)$, где $q(\theta)$ - эмпирическая оценка априорного распределения моделей $p(\theta)$. Если говорить неформально, то предпосылками для использования ансамблей является следующая идея. Если множество различных моделей из одного семейства голосуют за один и тот же вердикт, то с высокой вероятностью мы можем доверять данному вердикту. В обратной ситуации, если модели не согласованы в своих предсказаниях, то данное наблюдение может стать индикатором неопределенности, в частности это может свидетельствовать о том, что представленная задача выбивается из общего паттерна данных, которые модели смогли в своей общности обучить.
-	
-	Отправной точкой ввода оценок неопределенностей в статье является следующее соотношение:
+	The main tool for estimating uncertainty in the article is the use of models ensemble from a certain parametric family of models $\mathcal{F}(\theta)$ , where $q(\theta)$ - an empirical estimate of a prior distribution of models $p(\theta)$. Informally speaking, the following idea is a prerequisite for using ensembles. If many different models from the same family vote for the same verdict, it is highly probable that we can trust this verdict. In the opposite situation, if the models are not consistent in their predictions, this observation can become an indicator of uncertainty, in particular, it may indicate that the presented problem is out of the general pattern of the data that the models were able to train in their generality.
+
+	The starting point for entering uncertainty estimation in the article is the following relation:
 	\begin{equation}
 		\underbrace{\mathcal{I}[y, \theta|\textbf{x}, \mathcal{D}]}_\text{Knowledge Uncetainty}
 		= 
@@ -295,41 +296,40 @@
 		\underbrace{\mathbb{E}_{q(\theta)}[\mathcal{H}[P(y| \textbf{x}, \theta)]]}_\text{Data Uncertainty}
 	\end{equation}
 	
-	Здесь под $\mathcal{H}$ понимается энтропия по Шеннону, а под $\mathcal{I}$ - mutual information.
+	Here $\mathcal{H}$ is Shannon entropy and $\mathcal{I}$ - mutual information.
 	
-	Так же knowledge uncertainty можно оценивать другой метрикой, предложенной в статье, которая коррелирует с уже рассмотренной:
+	Knowledge uncertainty can also be evaluated using a different metric suggested in the article, which correlates with the one already considered:
 	\begin{equation}
 		\mathcal{K}[y, \theta] = \mathbb{E}_{q(\theta)q(\hat{\theta})}[
 			\mathrm{KL}[P(y|\textbf{x}, \theta) || P(y|\textbf{x}, \hat{\theta})
 		]
 	\end{equation}
 	
-	Мы рассмотрели только малую часть от предложенных автором метрик неопределенности, с полным исследованием можно ознакомиться в оригинальной статье. Более подробно вышеописанные метрики мы рассмотрим в последующих главах.
-	
-	Малинин в своей работе приводит некоторые эксперименты, демонстрирующие эффективность оценки неопределенности данными методами на различных уровнях для задачи ASR. В частности, эксперименты: out of distribution detection and misclassification detection. Однако, в данной статье плохо рассматривается оценка неопределенности для задачи машинного перевода.
-	\section{Overview summary}
-	Мы рассмотрели workaround работы. В данной работе мы планируем изучить корреляцию uncertainty и ошибки перевода. В частности, хотим выяснить как можно улучшить качество, добавляя в модель некоторое знание о неопределенности ее предсказания. В силу того, что token-level estimation для задачи машинного перевода изучен плохо, мы будем рассматривать именно этот подход. Так же постараемся выяснить корреляцию оценки неопределенности и larger beam size problem.
+	We have considered only a small part of the uncertainty metrics proposed by the author. The full study can be found in the original article. We will discuss the metrics described above in more detail in the following chapters.
 
+	Malinin in his work presents some experiments demonstrating the effectiveness of uncertainty estimation by these methods at various estimation levels for the ASR problem. In particular, experiments: out of distribution detection and misclassification detection. However, this article does not deal well with uncertainty estimation for a machine translation problem.
+	\section{Overview summary}
+	We have reviewed work workaround. In this paper, we plan to study the correlation between uncertainty and translation errors. In particular, we want to find out how to improve the quality by adding some knowledge about the uncertainty of prediction to the model. Due to the fact that the token-level estimation for the machine translation task is poorly understood, we will consider this approach. We will also try to find out the correlation between the uncertainty estimation and the larger beam size problem.
 \section{Preliminary}
-	Напомним workaround нашей работы.
-	
-	Пусть $X = (x^1, \dots, x^N)$, $R = (r^1, \dots, r^N)$ параллельный корпус предложений, где $X$ соответствует исходному языку, а $R$ - целевому (тот, на который мы переводим). Итоговый перевод некоторого предложения $x$ строится по следующей вероятностной модели (наша модель нейромашинного перевода): 
+	Recall the workaround of our work.
+
+	Let $X = (x^1, \dots, x^N)$, $R = (r^1, \dots, r^N)$ a parallel corpus of sentences, where $X$ corresponds to the source language, and $R$ corresponds to the target language (the one we are translating to). The final translation of a certain sentence $x$ is based on the following probabilistic model (our model of neuromachine translation):
 	\begin{equation*}
 		P(\textbf{y} | x, \theta) = P(y_1 | x, \theta) \prod_{i=2}^{L} P(y_i | y_{<i}, x, \theta)
 	\end{equation*}
 	
-	Цель данной работы: с помощью оценок неопределенностей (total, data) определять ситуации, когда модель допускает ошибку в предсказании очередного токена $y_i$. Мы рассмотрим далее несколько подходов и способов их использования.
-	
-	Бейзлайн модель данной работы - трансформер \bibref{transformer}{Vaswani et al.}{2017}, реализованный в библиотеке fairseq от Facebook. Далее во всех экспериментах мы будем рассматривать не одну модель, а ансамбль из 5ти трансформеров. Итоговая вероятностная модель ансамбля имеет вид:
+	The purpose of this work is to use uncertainty estimation (total, knowledge) to determine situations when the model makes an error in predicting the next token $y_i$. We will look at several approaches and ways to use them.
+
+	The baseline model of this work is the transformer \bibref{transformer}{Vaswani et al.} {2017}, implemented in the fairseq Facebook library. Next, in all experiments, we will consider an ensemble of 5 transformers. The final probability model of the ensemble has a form:
 	\begin{equation*}
 		P(y_i | y_{<i}, x, \mathcal{D}) = \frac1{K} \sum_{j=1}^{K}P(y_i | y_{<i}, x, \theta_j)
 	\end{equation*}
 	
-	В нашем случае $K=5$. Каждая модель в ансамбле была обучена на общих данных $X, R$, но из разных точек инициализации.
-	
-	В качестве обучающей, тестовой, валидационной  выборок для моделей трансформера был взят корпус \textit{IWSLT`14 De-En}. Целевая метрика данной работы - \textit{BLEU4}.
-	
-	Итоговые графики результатов можно видеть на изображении 7.
+	In our case, $K=5$. Each model in the ensemble was trained on shared data $X, R$, but from different initialization points.
+
+	\textit{IWSLT`14 De-En} was taken as a training, test, and validation samples for transformer models. The target metric for this work is \textit{BLEU4}.
+
+	The final graphs of the results can be seen at image 7.
 	
 	\begin{figure}[t]
 		\center{
@@ -338,7 +338,7 @@
 		\center{\caption{BLEU on test set for transformer model by beam size}}
 	\end{figure}
 	
-	Так же была обучена ансамбль из 5ти моделей с архитектурой \bibref{fconv}{Gehring et al.}{2017}, итоговые метрики для данного ансамбля можно видеть на изображении 8. Как можно видеть, трансформер показывает более высокие результаты, поэтому в качестве итоговой модели для экспериментов будем рассматривать именно трансформер.
+	An ensemble of 5 models with the \bibref{fconv}{Gehring et al.}{2017} architecture was also trained. the final metrics for this ensemble can be seen at image 8. As you can see, the transformer shows higher results, so we will consider the transformer as the final model for experiments.
 	
 	\begin{figure}[t]
 		\center{
@@ -347,35 +347,35 @@
 		\center{\caption{BLEU on test set for fconv model by beam size}}
 	\end{figure}
 	
-	Конфигурация каждой модели в ансамбле трансформеров была следующей:
+	The configuration of each model in the ensemble of transformers was as follows:
 	\begin{enumerate}
 		\item $clip\_norm = 0$
 		\item $learning\_rate=5*10^{-4}$
 		\item $label\_smoothing=0.1$
 		\item $epochs=75$
-		\item $lenpen=0$ (Мы хотим знать как будут влиять uncertainty estimation на деградацию BLEU от  beam size)
+		\item $lenpen=0$ (We want to know how uncertainty estimation will affect Bleu degradation by beam size)
 	\end{enumerate}
 	
-	Из графиков итоговых метрик видно, что с ростом beam size BLEU деградирует. Как мы выяснили ранее, это может быть вызвано завышением или занижением вероятностей тех или иных токенов. В данной работе мы так же попробуем выявить корреляцию этой проблемы с оценкой неопределенности.
+	The graphs of the final metrics show that with the growth of beam size BLEU degrades. As we found out earlier, this can be caused by overestimating or underestimating the probabilities of certain tokens. In this paper, we will also try to identify the correlation of this problem with the uncertainty.
 	
 \section{Misclassification detection}
-	В работе \bibref{uncertainty}{Malinin et al.}{2020} рассматривается попытка детекции ложно предсказанных токенов на задаче ASR. К сожалению, автор не проводил аналогичный эксперимент для NMT в связи с сложностью задания целевой метрики в машинном переводе.
-	
-	В нашей работе мы решили явно проверить, можно ли с помощью некоторых оценок неопределенностей обнаружить ошибочное предсказания очередного токена.
-	
-	Структура эксперимента будет следующей. Мы рассматриваем корпус предложений $X, R$. Пусть $y = (y^1, \dots, y^N)$ - соответствующие переводы, построенные ансамблем. Пусть $r_{i}, y_{i}$ - $ith$ токены истинного перевода и перевода модели, соответственно. Введем следующий индикатор корректности ith токена в переводе:
+	In \bibref{uncertainty}{Malinin et al.} {2020}, an attempt to detect falsely predicted tokens on the ASR problem is considered. Unfortunately, the author did not conduct a similar experiment for NMT due to the complexity of defining the correct target metric in machine translation.
+
+	In our work, we decided to explicitly check whether some uncertainty estimates can detect false predictions of the next token.
+
+	The structure of the experiment will be as follows. We consider the corpus of sentences $X, R$. Let $y = (y^1, \dots, y^N)$ - corresponding translations constructed by the ensemble. Let $r_{i}, y_{i}$ be $ith$  true translation and model translation tokens, respectively. Enter the following indicator of the ith token correctness in translation:
 	\begin{equation}
 		correct(y^{i}, \textbf{r}) := [y^{i} \in \textbf{r}]
 	\end{equation}
 	
-	Данная индикаторная величина будет нашей целевой функцией, которую мы хотим предсказывать по оценке неопределенности. Введем теперь \textit{total uncertainty estimation}:
+	This indicator value will be our target function, which we want to predict based on the uncertainty estimation. Now we introduce the \textit{total uncertainty estimation}:
 	\begin{equation}
 		TU(y_i) := \mathcal{H}[P(y_i|y_{<i}, \mathcal{D})]
 	\end{equation}
 	
-	Здесь в качестве $\mathcal{H}$ рассматривается энтропия по Шеннону. Данная метрика не разделяет виды неопределенностей, которые мы рассматривали ранее, она является индикатором для любого проявления. Она показывает насколько вероятностная масса итогового ансамбля разрежена по токенам словаря.
-	
-	Тогда для каждого токена $y_i^j \in H$ мы имеем целевывые функции $correct(y_i^j, r^j)$ и оценки неопределенностей $TU(y_i^j)$. Отнормируем на $[0, 1]$ оценки неопределенностей и получим некоторую модель, предсказывающую уверенность в ошибочности предсказания конкретного токена.
+	Here, the Shannon entropy is considered as $\mathcal{H}$. This metric does not separate the types of uncertainties that we have discussed earlier, it is an indicator for any manifestation. It shows how much the probability mass of the final ensemble is sparse by dictionary tokens.
+
+	Then for each $y_i^j \in H$ token, we have the target functions $correct(y_i^j, r^j)$ and uncertainty estimates $TU (y_i^j)$. We scale the uncertainty estimates to $[0, 1]$ and get some model that predicts confidence in the error of a particular token prediction.
 	
 	\begin{figure}[t]
 		\center{
@@ -383,15 +383,15 @@
 		}
 		\center{\caption{PR-curve for misclassification detection by TU}}
 	\end{figure}
-	Результаты эксперимента можно видеть на изображении 9. Если мы пытаемся максимизировать F1-score, то показатели получились хуже, чем у случайного предсказателя, однако, если нас утроит отлов только маленькой доли ошибок, мы можем получить сравнительно неплохую точность детекции. 
-	
-	Результаты, полученные нами согласуются с тезисом, выдвинутым Малининым. Казалось бы, индикатор корректности мы зафиксировали очень свободный, ошибкой считается всякий токен, которого, вообще, нет в переводе, но при этом оценка неопределенностей работает хуже, чем случайное предсказание. Проблема кроется в том, что, если в качестве перевода выдан близкий по смыслу синоним, в котором модели ансамбля сильно уверены, то с точки зрения нашего индикатора - это ошибка, однака оценка неопределенностей не обнаружит никаких аномалий. Как было замечено Малининым в своей статье, решением проблемы будет ручная разметка данных людьми для выявления более осмысленных таргетов в данном эксперименте.
-	
-	Однако, мы все-таки попробуем некоторые другие подходы и попытаемся их сравнить с данным. Возможно, нам удасться, используя другие оценки или индикаторы похожести добиться более высокого качества.
+	The results of the experiment can be seen in image 9. If we try to maximize the F1-score, the indicators turned out to be worse than the random predictor. However, if we are intesting only in a small percentage of errors, we can get a relatively good detection accuracy.
+
+	The results obtained by us are consistent with the thesis put forward by Malinin. It would seem that we have fixed a very easy correctness indicator (any token that is not in the translation at all is considered as an error), but the uncertainty estimation works worse than a random prediction. The problem lies in the fact that if the translation is a close meaning synonym, in which the ensemble models are strongly confident, then from the point of view of our indicator - this is an error, but the uncertainty estimation will not detect any anomalies. As noted by Malinin in his article, the solution to the problem will be human manual data markup to identify more meaningful targets in this experiment.
+
+	However, we will still try some other approaches and try to compare them with the current. We may be able to use other ratings or similarity indicators to achieve higher quality.
 	
 	\textbf{TODO KL + DU}
 	
-	Давайте теперь проведем аналогичные эксперименты для нового индикатора корректности:
+	Let's now conduct similar experiments for the new correctness indicator:
 	\begin{equation}
 		\delta(y^i, \textbf{r}) := [y^i = r^i]
 	\end{equation}
@@ -403,7 +403,7 @@
 		}
 		\center{\caption{PR-curve for misclassification detection by TU. $\delta(y^i, \textbf{r})$}}
 	\end{figure}	
-	И рассмотрим результаты на изображении 10. В этот раз наблюдаются очень высокие показатели. Однако, вызваны они не тем, что мы подобрали более релевантный индикатор корректности, а тем, что этот индикатор более строго определяет понятие ошибки. Теперь более вероятно встретить мисклассификацию и как следствие оценке неопределенностей легче стало с этим справляться. Поэтому данные результаты не очень resonable. Это легко видеть, если рассмотреть roc на изображении 11. Наша эмпирическая модель не сильно лучше справляется с задачей, чем случайный алгоритм. Важно заметить, после того как мы усилили условие корректности, доля положительного класса сильно выросла (0.76 против 0.26 в предыдущей постановке). Т.е. в данной постановке мы можем доверять ROC, поскольку положительный класс преобладает и как следствие баланс классов не ухудшает показатели.
+	And consider the results in image 10. This time, there are very good results. However, they are not caused by the fact that we have selected a more relevant correctness indicator, but by the fact that this indicator defines the concept of error more strictly. Now it is more likely to meet a misclassification and as a result, the uncertainty estimates have become easier to deal with this. Therefore, these results are not very reasonable. This is easy to see if we consider the ROC in image 11. Our empirical model does not do much better than a random algorithm. It is important to note that after we strengthened the correctness condition, the percentage of positive class increased significantly (0.76 against 0.26 in the previous statement). In this statement, we can trust ROC, since the positive class prevails and as a result, the balance of classes does not worsen results.
 	
 	\textbf{TODO KL + DU}
 	
@@ -416,8 +416,8 @@
 		\center{\caption{ROC for misclassification detection by TU. $\delta(y^i, \textbf{r})$}}
 	\end{figure}
 	
-\section{Корректность эксперимента}
-	Возникает важный вопрос: почему в принципе ошибка классификации может коррелировать с оценкой неопределенности TU. Попробуем ответить на этот вопрос.
+\section{Experiment correctness}
+	An important question arises: why a classification error can correlate with the uncertainty estimate TU. Let's try to answer this question.
 	
 	\begin{figure}[t]
 		\center{
@@ -426,37 +426,37 @@
 		\center{\caption{Ensemble softmax Shannon entropy}}
 	\end{figure}
 	
-	Попробуем оценить плотность распределения энтропии softmax для двух случаев: мы верно предсказали токен и мы допустили первую ошибку в предложении (весь префикс до этого токена мы предсказали верно). Т.е. для каждого такого случая мы посчитаем энтропию софтмакса и построим эмпирические оценки плотностей (отнормированные гистограммы). Результаты можно наблюдать на изображении 12.
-	
-	Как мы можем видеть, плотности в обоих случаях распределены почти нормально, унимодально. Причем мода распределения энтропий корректных токенов лежит строго левее моды распределения для первой ошибки, т.е. бОльшая часть вероятностной массы корректных токенов имеет более низкую энтропию у софтмакса (метрика TU). 
-	
-	Как мы можем это интерпретировать? Чем выше энтропия распределения, тем распределение более приближено к равномерному, т.е. все больше и больше появляются конкурирующих гипотез, т.е. наш ансамбль выделяет больше и больше равновероятных вариантов, а именно менее уверен в своем ответе. И наоборот если энтропия очень низкая, то распределение приближено к вырожденному, т.е. одна гипотеза имеет около единичную уверенность с точки зрения ансамбля. 
-	
-	Таким образом, если TU достаточно велико, это может быть индикатором того, что мы не очень уверены в токене, который мы предсказываем, что и позволяет нам оценить неопределенность в выставлении ответа.
+	Let's try to estimate the density of the softmax entropy distribution for two cases: we correctly predict the token and we made the first error in the sentence (we predicted the entire prefix before this token correctly). In the other words, for each such case, we will calculate the softmax entropy and construct empirical density estimates (normalized histograms). The results can be seen in image 12.
+
+	As we can see, the densities in both cases are distributed almost normally, unimodally. Moreover, the entropy distribution mode of correct tokens lies strictly to the left of the distribution mode for the first error, i.e. most of the probability mass of correct tokens has a lower softmax entropy (the TU metric).
+
+	How can we interpret this? The higher the entropy of the distribution - the distribution is more uniform, i.e. more and more competing hypotheses appear, i.e. our ensemble identifies more and more equally probable variants, namely, less confident in its answer. Conversely, if the entropy is very low, then the distribution is close to singular, i.e. one hypothesis has about $1.$ confidence from the point of view of the ensemble.
+
+	Thus, if the TU is large enough, it can be an indicator that we are not very confident in the token we are predicting, which allows us to estimate uncertainty in prediction.
 	
 	\textbf{TODO KL + DU + Beam size}
 	
-\section{Как использовать это на практике}
-	Предположим, что мы смогли добиться внушительных показателей, построив некоторую оценку неопределенности $PerfectTU$. Как мы могли бы это использовать для улучшения качества?
-	
-	К сожалению, возможностей не так много. Все, что мы можем сделать - это помечать в предложениях позиции, на которых мы ошибаемся, и, как следствие, менять наши предсказания. В силу консистентности моделей машинного перевода, было бы логично строить перепрогноз не на основе исходной модели, а обращаться к некоторому оракулу, который выдает более надежные предсказания. На практике, таким оракулом мог быть некоторый ассессор или модератор. Однако, данный подход накладывает сильные ограничения на возможности использования оценки неопределенности, т.к. не всякий проект может позволить поддержку человеческих ресурсов. Более того, если в задаче необходимо выдавать быстрые онлайн предсказания, использование модераторов становится невозможным.
-	
-	Таким образом, мы приходим к необходимости поменять способ оценивания неопределенности. Нам необходимо найти такой способ оценивания, чтобы наша модель смогла сама на основе оценки неопределенности поменять предсказания. На данный момент это невозможно сделать, т.к. предсказываемые токены при фиксированном префиксе имеют одну и ту же оценку неопределенности. В качестве нашего следующего подхода мы будем строить оценки не для всего софтмакса сразу, а для каждого токена в софтмаксе отдельно.
-	
-	В предыдущих разделах мы рассматривали KL в качестве оценки knowledge uncertainty. Давайте введем метрику, которая будет коррелировать с KL, но при этом будет строиться для каждого токена.
+\section{Using on practice}
+	Let's assume that we were able to achieve impressive results by constructing some uncertainty estimate $PerfectTU$. How can we use this to improve quality?
+
+	Unfortunately, there are not many opportunities. All we can do is mark the positions in the sentences where we are wrong and, as a result, change our predictions. Due to the consistency of machine translation models, it would be logical to build a re-prediction not based on the original model, but to refer to some Oracle that produces more reliable predictions. In practice, such an Oracle could be some assessor or moderator. However, this approach imposes strong restrictions on the use of uncertainty estimation, since not every project can afford the support of human resources. Moreover, if you need to make fast online predictions in a task, you can no longer use moderators.
+
+	Thus, we need to change the way we evaluate uncertainty. We need to find a way of estimating so that our model can change the predictions based on the uncertainty assessment itself. Now this is not possible, because the predicted tokens with a fixed prefix have the same uncertainty rating. As our next approach, we will not build estimates for the entire softmax at once, but for each token in the softmax separately.
+
+	In the previous sections we have considered KL as an evaluation of knowledge uncertainty. Let's introduce a metric that will correlate with KL, but will be built for each token.
 
 \section{Inensemble variance}
-	Напомним, что для каждого токена у нас определена вероятность:
+	Recall that for each token, we have denoted probability:
 	\begin{equation*}
 		P(y_i | y_{<i}, x, \mathcal{D}) = \frac1{K} \sum_{j=1}^{K}P(y_i | y_{<i}, x, \theta_j)
 	\end{equation*}
 	
-	Таким образом, для каждого токена мы имеем: условную вероятность токена для ансамбля и K условных вероятностей токена для моделей. Давайте в качестве меры неопределенности введем несмещенную выборочную дисперсию токена вдоль моделей в ансамбле:
+	Thus, for each token, we have: a conditional probability of the token for the ensemble and K conditional probabilities of the token for the models. Let's introduce an unbiased sample variance of the token probability along the models in the ensemble as a measure of uncertainty:
 	\begin{equation}
 		inens\_var(y_i) := S^2(P(y_i | y_{<i}, x, \theta_1), \dots, P(y_i | y_{<i}, x, \theta_K))
 	\end{equation}
 	
-	Данная оценка будет служить мерой согласованности моделей в предсказании вероятности данного токена (некоторый аналог KL в предыдущих главах). Заметим, что энтропийный критерий более подходит для нас в качестве меры неопределенности, т.к. с помощью дисперсии сложно разделять случаи: вырожденное распределение и равномерное распределение. Тем не менее, дисперсия все еще позволяет отделить распределения с высоким уровнем конкурирующих гипотез. Мы остановились на выборе именно дисперсии, т.к. вероятности моделей не образуют вероятностную меру (на этих вероятностях не задано распределение, значения могут быть абсолютно не согласованными), поэтому вычисление энтропии некорректно в данном случае.
+	This estimate will serve as a measure of model consistency in predicting the probability of a given token (some analog of KL in previous chapters). Note that the entropy criterion is more suitable for us as a measure of uncertainty, since using variance it is difficult to separate cases: a singular distribution and a uniform distribution. However, variance still allows you to separate distributions with a high level of competing hypotheses. We choosed variance, because the probabilities of models do not form a probability measure (no distribution is set on these probabilities, the values may be completely inconsistent), so the calculation of entropy is incorrect in this case.
 	
 	\begin{figure}[t]
 		\center{
@@ -464,9 +464,9 @@
 		}
 		\center{\caption{Inensemble variance among models for correct token and first error token}}
 	\end{figure}
-	Рассмотрим следующий график (изображение 13). Здесь представлена плотности новой оценки неопределенности для двух видов токенов: первый ошибочный токен в предложении (префикс до этого токена предсказали корректно) и истинный токен для этой позиции при том же префиксе. Сразу можно заметить, что как и в предыдущем случае бОльшая часть вероятностной массы корректного токена находится на порядки левее (меньшая дисперсия), чем у ошибочного токена. Данное наблюдение дает нам надежду на то, что модели в ансамбле выдают более согласованные предсказания вероятностей для корректного токена и больше сомневаются в выставленной вероятности для итогового токена.
-	
-	Возникает закономерный вопрос: почему несмотря на более низкую согласованность, в итоговом предсказании оказался тот токен, который оказался. Для ответа на данный вопрос нам необходимо посмотреть на распределения вероятностей для этих же токенов (изображение 14).
+	Consider the following graph (image 13). Here is a model of a new uncertainty estimation for two types of tokens: the first false token in the prediction (the prefix before this token was predicted correctly) and the true token for this position with the same prefix. You can immediately notice that, as in the previous case, most of the probability mass of the correct token has lower variance than that of the incorrect token. This observation gives us hope that the models in the ensemble produce more consistent predictions of probabilities for the correct token and more doubt about the probability prediction for the final token.
+
+	There is a logical question: why, despite the lower consistency, the final prediction turned out to be the token that turned out to be. To answer this question, we need to look at the probability distributions for these same tokens (image 14).
 	
 	\begin{figure}[t]
 		\center{
@@ -475,7 +475,7 @@
 		\center{\caption{Token-level ensemble probability for correct token and first error token}}
 	\end{figure}
 	
-	Как мы видим из графиков, мы допускаем ошибку на данной позиции, т.к. зачастую мы имеем около нулевую вероятность для истинного токена, поэтому отдается предпочтение более вероятному токену (и его продолжению).
+	As we can see from the charts, we make an error in this position, because often we have about zero probability for a true token, so we prefer the more likely token (and its continuation).
 	
 	\begin{figure}[t]
 		\center{
@@ -483,33 +483,33 @@
 		}
 		\center{\caption{Token-level ensemble probability by inensemble variance for correct token and first error token}}
 	\end{figure}
-	Так же хотелось бы взглянуть как соотносятся между собой значения дисперсий и значения вероятностей. Перейдем к графику 15. В данном графике раскрывается серьезный недостаток рассмотрения дисперсии. Рассмотрим следующий пример. Пусть мы имеем некоторую выборку $t = (t_1, \dots, t_m)$ и пусть ей соответсвует выборочное среднее: $S^2(t)$. Вычислим:
+	We would also like to see how the variance values and probability values relate to each other. Let's go to figure 15. This graph reveals a serious disadvantage of considering variance. Consider the following example. Let us have some sample $t = (t_1, \dots, t_m)$ and let it correspond to the sample variance: $S^2 (t)$. Calculate:
 	\begin{equation*}
 		S^2(\alpha t) = S^2((\alpha t_1, \dots, \alpha t_m)) = \alpha^2 S^2(t)
 	\end{equation*}
 	
-	Таким образом, значение нашей метрики зависит не только от совокупного соотношения величин в выборке, но и от порядка этих значений. Именно этот эффект мы и наблюдали на графике 15. Для бОльшей вероятностной массы корректного токена низкое значение оценки неопределенности которую мы выбрали вызвано не согласованностью моделей, а порядком вероятности, т.е. дисперсия около нулевых вероятностей засчет свойства выше на порядки ниже всегда.
+	Thus, the value of our metric depends not only on the total relation between values in the sample, but also on the absolute values of these values. This is the effect we saw on chart 15. For a higher probability mass of a valid token, the low value of the uncertainty estimate that we selected is not due to the consistency of the models, but rather to the values of probabilities, i.e. the variance of near zero probabilities always lower, because of property above.
+
+	However, despite this, by comparing the variance of the correct and false token with equal probabilities, we can observe that the expected variance for the correct token is lower than for the erroneous one. Therefore, although not on the entire probability mass, but on some of its part, our estimation of uncertainty gives adequate predictions.
+
+	In order to make sure of this, you need to see how our rating behaves on other tokens of the same softmax. To do this, we will consider: a random token, tokens with top-3, top-5, and top-20 probabilities in a descending series of variations. The final graphs of the probability distribution and uncertainty estimates can be seen in figure 16.
 	
-	Однако, несмотря на это, сопоставляя дисперсии корректного и ошибочного токена при равных вероятностях, мы можем наблюдать, что ожидаемая дисперсия для корректного токена выше, чем для ошибочного. Поэтому хотя и не на всей вероятностной массе, но на некоторой ее адекватной части наша оценка неопределенности дает адекватные предсказания.
+	As we can see, correct tokens are not so hopeless. A high proportion of the probability mass of correct tokens has relatively high probabilities (the expected position in the variation series of probabilities == 2). Moreover, the models ' confidence in the correct tokens is not inferior to the variance of other tokens. We can use these observations to help the model find the correct tokens.
 	
-	Для того, чтобы в этом убедиться, необходимо посмотреть как ведет себя наша оценка на других токенах этого же софтмакса. Для этого будем рассматривать: случайный токен, токены с топ-3, топ-5 и топ-20 вероятностями в вариационном ряду по убыванию. Итоговые графики распределения вероятностей и оценок неопределенностей можно видеть на фигуре 16.
-	
-	\begin{figure}[t]
+	\begin{figure}[H]
 		\center{
 			\includegraphics[width=0.6\textwidth]{dummy.png}
 		}
 		\center{\caption{Token-level ensemble probability and inensemble variance for correct token, first error token, random token, top-3 top-5 and top-20 tokens}}
 	\end{figure}
 	
-	Как мы видим, корректные токены не такие безнадежные. Высокая доля вероятностной массы корректных токенов имеет сравнительно высокие вероятности (ожидаемая позиция в вариационном ряду вероятностей == 2). Более того уверенность моделей в корректных токенах разительно не уступает дисперсии других токенов. Мы можем воспользоваться данными наблюдениями, чтобы помочь модели находить корректные токены.
-	
-\section{Перевзес вероятностного распределения}
-	Наша задача сейчас перенормировать метрикой неопределенности вероятностные распределения токенов таким образом, чтобы распределение корректного токена стало более превалирующим с точки зрения выбора итоговой гипотезы моделью. Таким образом, задача сводится к нахождению некоторой функции $g$:
+\section{Probability distribution calibration}
+	Our task now is to renormalize the probability distributions of tokens with the uncertainty metric in such a way that the distribution of the correct token becomes more prevalent in terms of choosing the final hypothesis by the model. Thus, the problem is reduced to finding some function $g$:
 	\begin{equation*}
 		\hat{p}(y | x, \mathcal{D}) = softmax(g(p(y | x, \mathcal{D}),\, inens\_var(y)))
 	\end{equation*}
 	
-	Если мы посмотрим на график 17, то станет ясно, что подбором $g$ мы можем искривлять этот график только вдоль оси X. Говоря наглядным языком, мы бы хотели вдоль каждой линии уровня дисперсии стянуть плотность корректного токена к правому краю, а плотность всякого любого другого токена к левому.
+	If we look at graph 17, it becomes clear that by selecting $g$, we can only bend this graph along the x axis. In visual terms, we would like to pull the density of the correct token to the right edge along each contour line of the variance, and the density of any other token to the left.
 	
 	\begin{figure}[t]
 		\center{
@@ -518,56 +518,59 @@
 		\center{\caption{Token-level ensemble probability by inensemble variance for correct token, first error token, random token, top-3 top-5 and top-20 tokens}}
 	\end{figure} 
 	
-	Напомним, что мы бы хотели штрафовать за высокие значения uncertainty, однако не так сильно, чтобы не перевзвесить совсем нерелевантные токены. Плохим примером функции $g$ будет:
+	Remind that we want to penalize for high values of uncertainty, but not so much as to overweight completely irrelevant tokens. A bad example of the $g$ function would be:
 	Здесь и далее положим: $\sigma^2 := inens\_var$
 	\begin{equation}
 		g_{naive} := \log p(y | x, \mathcal{D}) - \log(\sigma^2)
 	\end{equation}
 	
-	Мы явно награждаем токены с очень низким значением дисперсии и, наоборот, сильно штрафуем за высокие значения неопределенности. Данный наивный подход приводит к диаметрально противоположной ситуации (изображение 18). Мы, видим, что такие сильные штрафы приводят к тому, что высокую вероятность принимаю не осмысленные токены, а случайные. Это происходит по той причине, что дисперсия случайных токенов крайне низка из-за особенностей метрики, которые мы обсуждали ранее. В итоге модель просто выдает абсолютно случайные переводы.
+	We explicitly reward tokens with a very low variance value and, conversely, heavily penalize them for high uncertainty values. This naive approach leads to a diametrically opposite situation (image 18). We can see that such strong penalties lead to a high probability of accepting random tokens. This is because the variance of random tokens is extremely low due to the property of the metric that we discussed earlier. As a result, the model simply produces completely random translations.
 	
 	\begin{figure}[t]
 		\center{
 			\includegraphics[width=0.6\textwidth]{dummy.png}
 		}
-		\center{\caption{Token-level ensemble probability by inensemble variance for correct token, first error token, random token, top-3 top-5 and top-20 tokens}}
+		\center{\caption{Token-level ensemble probability by inensemble variance for correct token, first error token, random token, top-3 top-5 and top-20 tokens for $g_{naive}$}}
 	\end{figure}
 	
-	Попробуем несколько ослабить штраф за неопределенность, делить вероятность на коррень из меры неопределенности:
+	Let's try to slightly weaken the penalty for uncertainty, divide the probability by the root of the variance:
 	\begin{equation}
 		g_{less\_naive} := \log p(y | x, \mathcal{D}) - \log(\sigma)
 	\end{equation}
 	
-	Как мы видим из графика 19, это не привнесло никаких успехов, т.к. мы не поменяли даже относительный порядок распределений вероятностей.
-	
-	Если мы еще раз взглянем на график 17, то будет ясно, что линейными функциями $g$ мы не сможем добиться перестройки порядка следования распределений с точки зрения вероятностей (напомним, что график представлен в лог шкалах). Таким образом, мы приходим к тому, что преобразование должно быть не линейным по $\log \sigma^2$, более того пик (точка максимума) должна приходиться на кусок распределения корректного токена, который не перекрывается никаким другим распределением.
-	
-	Тогда давайте в качестве такой функции возьмем:
+	As we can see from graph 19, this did not bring any success, since we did not even change the relative order of probability distributions.
+	\begin{figure}[t]
+		\center{
+			\includegraphics[width=0.6\textwidth]{dummy.png}
+		}
+		\center{\caption{Token-level ensemble probability by inensemble variance for correct token, first error token, random token, top-3 top-5 and top-20 tokens for $g_{less\_naive}$}}
+	\end{figure}
+
+	If we take another look at graph 17, it will be clear that we cannot use linear functions $g$ to rearrange the order of distributions in terms of probabilities (recall that the graph is presented in log scales). Thus, we come to the conclusion that the calibration must not be linear by $\log \sigma^2$, moreover, the peak (maximum point) must fall on a part of the distribution of the correct token, which is not overlapped by any other distribution.
+
+	Then let's take a function:
 	\begin{equation}
 		g_{2} := \log p(y | x, \mathcal{D}) - (\log(\sigma) + \alpha)^2
 	\end{equation}
 	
-	 Где $\alpha$ некоторый гиперпараметр, от которого будет зависеть в какой точке будет достигаться максимум. Рассмотрим частный пример (график 20).
-	 
-	 \begin{figure}[t]
+	 Where $\alpha$ is a certain hyperparameter that will depend on which point the maximum will be reached. Let's consider a special example (graph 20).
+	
+	\textbf{TODO Conclusion}
+	
+	Note that the density of the wrong token still remains to the right of the density of the correct token. Unfortunately or fortunately, we can't do anything with these points, because if a certain token has a high probability on the same contour line of variance, obviously, we should give preference to this particular token. However, even this results can lead to good results, because in the case of a non-single beam size, even a small overweight can lead to the choice of correct hypotheses, because the choice of hypothesis is based on cumulative probabilities, not on a greedy choice.
+	\begin{figure}[H]
 		\center{
 			\includegraphics[width=0.6\textwidth]{dummy.png}
 		}
 		\center{\caption{Token-level $softmax(g_2)$ by inensemble variance for correct token, first error token, random token, top-3 top-5 and top-20 tokens}}
 	\end{figure}
-	
+\section{Calibration BLEU}
 	\textbf{TODO}
 	
-	Заметим, что плотность ошибочного токена по прежнему осталась правее, плотности корректного токена. К сожалению или к счастью, с этими точками мы не можем ничего сделать, т.к. если на одной и той же линии уровня дисперсий некоторый токен имеет бОльшую вероятность, очевидно, мы должны отдавать предпочтение именно этому токену. Однако, даже уже полученные результаты могут привести к неплохим результатам, т.к. в случае не единичиного beam size даже небольшой перевзвес может привести к выбору корректных гипотез, т.к. выбор гипотезы делается на основе куммулятивных вероятностей, а не на основе жадного выбора.
-\section{BLEU перезвеса}
-	\textbf{TODO}
-	
-\section{Выводы}
+\section{Conclusion}
 	\textbf{TODO}
 	
 	
-	
-
 	\begin{thebibliography}{0}		
 		\bibitem{fconv}\hypertarget{fconv}{}
 		\href{https://arxiv.org/pdf/1705.03122.pdf}
