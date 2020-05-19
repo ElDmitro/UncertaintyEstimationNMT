@@ -310,6 +310,8 @@ Then the machine translation model sets the following cumulative probability:
 	Malinin in his work presents some experiments demonstrating the effectiveness of uncertainty estimation by these methods at various estimation levels for the ASR problem. In particular, experiments: out of distribution detection and misclassification detection. However, this article does not deal well with uncertainty estimation for a machine translation problem.
 	\section{Overview summary}
 	We have reviewed work workaround. In this paper, we plan to study the correlation between uncertainty and translation errors. In particular, we want to find out how to improve the quality by adding some knowledge about the uncertainty of prediction to the model. Due to the fact that the token-level estimation for the machine translation task is poorly understood, we will consider this approach. We will also try to find out the correlation between the uncertainty estimation and the larger beam size problem.
+	
+
 \section{Preliminary}
 	Recall the workaround of our work.
 
@@ -329,23 +331,16 @@ Then the machine translation model sets the following cumulative probability:
 
 	\textit{IWSLT`14 De-En} was taken as a training, test, and validation samples for transformer models. The target metric for this work is \textit{BLEU4}.
 
-	The final graphs of the results can be seen at image 7.
+	The final graph of the results can be seen at image 7.
 	
 	\begin{figure}[t]
 		\center{
-			\includegraphics[width=0.6\textwidth]{dummy.png}
+			\includegraphics[width=0.6\textwidth]{images/single_transformer_bleu.png}
 		}
 		\center{\caption{BLEU on test set for transformer model by beam size}}
 	\end{figure}
 	
-	An ensemble of 5 models with the \bibref{fconv}{Gehring et al.}{2017} architecture was also trained. the final metrics for this ensemble can be seen at image 8. As you can see, the transformer shows higher results, so we will consider the transformer as the final model for experiments.
-	
-	\begin{figure}[t]
-		\center{
-			\includegraphics[width=0.6\textwidth]{dummy.png}
-		}
-		\center{\caption{BLEU on test set for fconv model by beam size}}
-	\end{figure}
+	An ensemble of 5 models with the \bibref{fconv}{Gehring et al.}{2017} architecture was also trained. The transformer showes higher results, so we will consider the transformer as the final model for experiments.
 	
 	The configuration of each model in the ensemble of transformers was as follows:
 	\begin{enumerate}
@@ -379,52 +374,92 @@ Then the machine translation model sets the following cumulative probability:
 	
 	\begin{figure}[t]
 		\center{
-			\includegraphics[width=0.6\textwidth]{dummy.png}
+			\includegraphics[width=0.6\textwidth]{images/malinin_in_tu.png}
 		}
 		\center{\caption{PR-curve for misclassification detection by TU}}
 	\end{figure}
-	The results of the experiment can be seen in image 9. If we try to maximize the F1-score, the indicators turned out to be worse than the random predictor. However, if we are intesting only in a small percentage of errors, we can get a relatively good detection accuracy.
+	The results of the experiment can be seen in image 8. If we try to maximize the F1-score, the indicators turned out to be worse than the random predictor. However, if we are intesting only in a small percentage of errors, we can get a relatively good detection accuracy.
 
 	The results obtained by us are consistent with the thesis put forward by Malinin. It would seem that we have fixed a very easy correctness indicator (any token that is not in the translation at all is considered as an error), but the uncertainty estimation works worse than a random prediction. The problem lies in the fact that if the translation is a close meaning synonym, in which the ensemble models are strongly confident, then from the point of view of our indicator - this is an error, but the uncertainty estimation will not detect any anomalies. As noted by Malinin in his article, the solution to the problem will be human manual data markup to identify more meaningful targets in this experiment.
 
 	However, we will still try some other approaches and try to compare them with the current. We may be able to use other ratings or similarity indicators to achieve higher quality.
 	
-	\textbf{TODO KL + DU}
+	Malinin considers another way of uncertainty estimation:
+	\begin{equation*}
+		\mathcal{K}[y, \theta] = \mathbb{E}_{q(\theta)q(\hat{\theta})}[
+			\mathrm{KL}[P(y|\textbf{x}, \theta) || P(y|\textbf{x}, \hat{\theta})
+		]
+	\end{equation*}
 	
-	Let's now conduct similar experiments for the new correctness indicator:
+	\begin{figure}[t]
+		\begin{subfigure}{.45\textwidth}
+			\includegraphics[width=\textwidth]{images/malinin_in_kl.png}
+			\center{\caption{$\mathcal{K}[y, \theta]$}}
+		\end{subfigure}
+		\begin{subfigure}{.45\textwidth}
+			\includegraphics[width=\textwidth]{images/malinin_in_du.png}
+			\center{\caption{Data uncertainty}}
+		\end{subfigure}
+		\center{\caption{PR-curve for misclassification detection}}
+	\end{figure}
+	Recall that this metric estimates knowledge uncertainty (model uncertainty). Let us take a look at experiment results for this case (figure 9(a)). As we can see $\mathbb{KL}$ solves misclassification problem worse than previous one. This results conform with the result that Malinin gets in his paper for ASR model (Knowledge uncertainty metrics estimate worse than total uncertainty estimations). Nevertheless, $\mathbb{KL}$ could be effective, if we define more resonable correctness indicator, as a total uncertainty estimation could be. 
+	
+	One more uncertainty estimation, that Malinin consideres in his paper is data uncertainty estimation:
+	\begin{equation*}
+		\mathbb{E}_{q(\theta)}[\mathcal{H}[P(y| \textbf{x}, \theta)]]
+	\end{equation*}
+	Expirement results, using data uncertainty estimation, are presented in figure 9(b). Obtained score is as bad as in TU case (as previous one, it conforms with Malinin ASR results). As we can see, data uncertainty estimation gains more score, than model uncertainty estimation. That is why we can suggest that, if considered metrics is resonable, so uncerainty in data influences on model prediction quality more than uncertainty in models generalization ability in ensemble.
+	
+	Total uncertainty, data uncertainty and knowledge uncertainty estimates low results caused by same reasons, that we discussed above. That is why let us go further.
+	
+	Let us now conduct similar experiments for the new correctness indicator:
 	\begin{equation}
 		\delta(y^i, \textbf{r}) := [y^i = r^i]
 	\end{equation}
 	
 		
 	\begin{figure}[t]
-		\center{
-			\includegraphics[width=0.6\textwidth]{dummy.png}
-		}
-		\center{\caption{PR-curve for misclassification detection by TU. $\delta(y^i, \textbf{r})$}}
+		\begin{subfigure}{.45\textwidth}
+			\centering
+			\includegraphics[width=1\textwidth]{images/malinin_eq_tu.png}
+			\caption{PR-curve}
+		\end{subfigure}
+		\begin{subfigure}{.45\textwidth}
+			\centering
+			\includegraphics[width=1\textwidth]{images/malinin_eq_tu_roc.png}
+			\caption{ROC}
+		\end{subfigure}
+		\center{\caption{Misclassification detection by TU. $\delta(y^i, \textbf{r})$}}
 	\end{figure}	
-	And consider the results in image 10. This time, there are very good results. However, they are not caused by the fact that we have selected a more relevant correctness indicator, but by the fact that this indicator defines the concept of error more strictly. Now it is more likely to meet a misclassification and as a result, the uncertainty estimates have become easier to deal with this. Therefore, these results are not very reasonable. This is easy to see if we consider the ROC in image 11. Our empirical model does not do much better than a random algorithm. It is important to note that after we strengthened the correctness condition, the percentage of positive class increased significantly (0.76 against 0.26 in the previous statement). In this statement, we can trust ROC, since the positive class prevails and as a result, the balance of classes does not worsen results.
+	And consider the results in image 10(a). This time, there are very good results. However, they are not caused by the fact that we have selected a more reasonable correctness indicator, but by the fact that this indicator defines the concept of error more strictly. Now it is more likely to meet a misclassification and as a result, the uncertainty estimates have become easier to deal with this. Therefore, these results are not very reasonable. This is easy to see if we consider the ROC in image 10(b). Our empirical model does not do much better than a random algorithm. It is important to note that after we strengthened the correctness condition, the percentage of positive class increased significantly (0.76 against 0.26 in the previous statement). In this statement, we can trust ROC, since the positive class prevails and as a result, the balance of classes does not worsen experiment results.
 	
-	\textbf{TODO KL + DU}
+	\begin{figure}[t]
+		\begin{subfigure}{.45\textwidth}
+			\centering
+			\includegraphics[width=1\textwidth]{images/malinin_eq_kl.png}
+			\caption{$\mathcal{K}[y, \theta]$}
+		\end{subfigure}
+		\begin{subfigure}{.45\textwidth}
+			\centering
+			\includegraphics[width=1\textwidth]{images/malinin_eq_du.png}
+			\caption{DU}
+		\end{subfigure}
+		\center{\caption{Misclassification detection. $\delta(y^i, \textbf{r})$}}
+	\end{figure}
+	
+	As for previous correctness indicator, we considers data unceratainty estimate and $\mathbb{KL}$ estimate on figure 11.
 	
 	\textbf{Пассаж про beam size}
 
-	\begin{figure}[t]
-		\center{
-			\includegraphics[width=0.6\textwidth]{dummy.png}
-		}
-		\center{\caption{ROC for misclassification detection by TU. $\delta(y^i, \textbf{r})$}}
-	\end{figure}
+
 	
-\section{Experiment correctness}
-	An important question arises: why a classification error can correlate with the uncertainty estimate TU. Let's try to answer this question.
-	
-	\begin{figure}[t]
-		\center{
-			\includegraphics[width=0.6\textwidth]{dummy.png}
-		}
+\subsection{Experiment correctness}
+	\begin{wrapfigure}{l}{0.5\textwidth}
+		\includegraphics[width=0.5\textwidth]{images/ens_entropy.png}
 		\center{\caption{Ensemble softmax Shannon entropy}}
-	\end{figure}
+	\end{wrapfigure}
+	
+	An important question arises: why a classification error can correlate with the uncertainty estimate TU. Let's try to answer this question.
 	
 	Let's try to estimate the density of the softmax entropy distribution for two cases: we correctly predict the token and we made the first error in the sentence (we predicted the entire prefix before this token correctly). In the other words, for each such case, we will calculate the softmax entropy and construct empirical density estimates (normalized histograms). The results can be seen in image 12.
 
@@ -434,10 +469,44 @@ Then the machine translation model sets the following cumulative probability:
 
 	Thus, if the TU is large enough, it can be an indicator that we are not very confident in the token we are predicting, which allows us to estimate uncertainty in prediction.
 	
-	\textbf{TODO KL + DU + Beam size}
+	\begin{figure}[t]
+		\begin{subfigure}{.45\textwidth}
+			\centering
+			\includegraphics[width=1\textwidth]{images/ens_kl.png}
+			\caption{$\mathcal{K}[y, \theta]$}
+		\end{subfigure}
+		\begin{subfigure}{.45\textwidth}
+			\centering
+			\includegraphics[width=1\textwidth]{images/ens_du.png}
+			\caption{DU}
+		\end{subfigure}
+		\center{\caption{Uncertainty estimates distribution for correct and error tokens}}
+	\end{figure}
 	
-\section{Using on practice}
-	Let's assume that we were able to achieve impressive results by constructing some uncertainty estimate $PerfectTU$. How can we use this to improve quality?
+	Further, let us collect same distribution but for:
+	\begin{equation*}
+		\mathcal{K}[y, \theta] = \mathbb{E}_{q(\theta)q(\hat{\theta})}[
+			\mathrm{KL}[P(y|\textbf{x}, \theta) || P(y|\textbf{x}, \hat{\theta})
+		]
+	\end{equation*}
+	
+	Firstly, we should interpret this kind of uncertainty estimate. $\mathbb{KL}$-divergence measures difference between two distributions (more - worse), this estimate is always non-negative. While we take expectation of estimate, we try to average difference between softmaxes among all possible models pairs. We can interpret $\mathcal{K}[y, \theta]$ as average value of difference between models predictions. Therefore, this metric shows us how models in ensemble conform with each other. Prerequisite to use this kind of uncertainty estimate is that it is possible, more inconsistent prediction models in ensemble make, higher probability we get to make a mistake on current token. Less formal, $\mathcal{K}[y, \theta]$ correlate with errors in predictions.
+	
+	Final statistics can be seen at figure 13(a). As in previous case, correct prefix density separable from first error token distribution. Moreover, expected value of kullback-leibler divergence is less than first error token's one. It meens for us, that correlation we discussed earlier exists and it could be effective to use this kind of uncertainty estimate in misclassification problem. 
+	
+	Our final uncertainty estimate in this section is:
+	\begin{equation*}
+		DU = \mathbb{E}_{q(\theta)}[\mathcal{H}[P(y| \textbf{x}, \theta)]]
+	\end{equation*}
+	
+	As always, we should explore its meaning. While we evaluate data uncertainty estimate, we consider average single model self-confidence in ensemble. This metric is an attempt to evaluate how common considered situation ($p(y_i | y_{<i}, \textbf{x}, \theta)$) is, how presented data blends with average model generalization ability. Therefore, DU could be a good measure of data uncertainty. Prerequisite to use DU is same as previous.
+	
+	Final statistics for DU can be seen at figure 13(b). We can see that our prerequisite is confirmed.
+	
+	Overall, we considered three types of uncertainty estimation and emperically proved correlation between all types of uncertainty and predictions errors. But anyway our main barier to use uncertainty estimates in misclassification problem is token correctness indicator.
+	
+\subsection{Using on practice}
+	Let's assume that we were able to achieve imressive results by constructing some uncertainty estimate $PerfectTU$. How can we use this to improve quality?
 
 	Unfortunately, there are not many opportunities. All we can do is mark the positions in the sentences where we are wrong and, as a result, change our predictions. Due to the consistency of machine translation models, it would be logical to build a re-prediction not based on the original model, but to refer to some Oracle that produces more reliable predictions. In practice, such an Oracle could be some assessor or moderator. However, this approach imposes strong restrictions on the use of uncertainty estimation, since not every project can afford the support of human resources. Moreover, if you need to make fast online predictions in a task, you can no longer use moderators.
 
@@ -445,7 +514,7 @@ Then the machine translation model sets the following cumulative probability:
 
 	In the previous sections we have considered KL as an evaluation of knowledge uncertainty. Let's introduce a metric that will correlate with KL, but will be built for each token.
 
-\section{Inensemble variance}
+\section{Inensemble uncertainty estimate}
 	Recall that for each token, we have denoted probability:
 	\begin{equation*}
 		P(y_i | y_{<i}, x, \mathcal{D}) = \frac1{K} \sum_{j=1}^{K}P(y_i | y_{<i}, x, \theta_j)
@@ -459,38 +528,41 @@ Then the machine translation model sets the following cumulative probability:
 	This estimate will serve as a measure of model consistency in predicting the probability of a given token (some analog of KL in previous chapters). Note that the entropy criterion is more suitable for us as a measure of uncertainty, since using variance it is difficult to separate cases: a singular distribution and a uniform distribution. However, variance still allows you to separate distributions with a high level of competing hypotheses. We choosed variance, because the probabilities of models do not form a probability measure (no distribution is set on these probabilities, the values may be completely inconsistent), so the calculation of entropy is incorrect in this case.
 	
 	\begin{figure}[t]
-		\center{
-			\includegraphics[width=0.6\textwidth]{dummy.png}
-		}
-		\center{\caption{Inensemble variance among models for correct token and first error token}}
+		\begin{subfigure}{.5\textwidth}
+			\includegraphics[width=\textwidth]{images/inens_var_density.png}
+			\center{\caption{Inensemble variance among models}}
+		\end{subfigure}
+		\begin{subfigure}{.5\textwidth}
+			\includegraphics[width=\textwidth]{images/inens_mean_density.png}
+			\center{\caption{Token probability}}
+		\end{subfigure}
+		\center{\caption{Statistics for correct token and first error token in softmax}}
 	\end{figure}
-	Consider the following graph (image 13). Here is a model of a new uncertainty estimation for two types of tokens: the first false token in the prediction (the prefix before this token was predicted correctly) and the true token for this position with the same prefix. You can immediately notice that, as in the previous case, most of the probability mass of the correct token has lower variance than that of the incorrect token. This observation gives us hope that the models in the ensemble produce more consistent predictions of probabilities for the correct token and more doubt about the probability prediction for the final token.
+	Consider the following graph (image 14(a)). Here is a model of a new uncertainty estimation for two types of tokens: the first false token in the prediction (the prefix before this token was predicted correctly) and the true token for this position with the same prefix. You can immediately notice that, as in the previous case, most of the probability mass of the correct token has lower variance than that of the incorrect token. This observation gives us hope that the models in the ensemble produce more consistent predictions of probabilities for the correct token and more doubt about the probability prediction for the final token.
 
-	There is a logical question: why, despite the lower consistency, the final prediction turned out to be the token that turned out to be. To answer this question, we need to look at the probability distributions for these same tokens (image 14).
-	
-	\begin{figure}[t]
-		\center{
-			\includegraphics[width=0.6\textwidth]{dummy.png}
-		}
-		\center{\caption{Token-level ensemble probability for correct token and first error token}}
-	\end{figure}
+	There is a logical question: why, despite the lower consistency, the final prediction turned out to be the token that turned out to be. To answer this question, we need to look at the probability distributions for these same tokens (image 14(b)).
 	
 	As we can see from the charts, we make an error in this position, because often we have about zero probability for a true token, so we prefer the more likely token (and its continuation).
 	
 	\begin{figure}[t]
-		\center{
-			\includegraphics[width=0.6\textwidth]{dummy.png}
-		}
+		\begin{subfigure}{.5\textwidth}
+			\includegraphics[width=\textwidth]{images/inens_scatter_correct.png}
+			\center{\caption{Correct token}}
+		\end{subfigure}
+		\begin{subfigure}{.5\textwidth}
+			\includegraphics[width=\textwidth]{images/inens_scatter_error.png}
+			\center{\caption{Error predicted token}}
+		\end{subfigure}
 		\center{\caption{Token-level ensemble probability by inensemble variance for correct token and first error token}}
 	\end{figure}
-	We would also like to see how the variance values and probability values relate to each other. Let's go to figure 15. This graph reveals a serious disadvantage of considering variance. Consider the following example. Let us have some sample $t = (t_1, \dots, t_m)$ and let it correspond to the sample variance: $S^2 (t)$. Calculate:
+	We would also like to see how the variance values and probability values relate to each other. Refer to figure 15. This graph reveals a serious disadvantage of considering variance. Consider the following example. Let us have some sample $t = (t_1, \dots, t_m)$ and let it correspond to the sample variance: $S^2 (t)$. Calculate:
 	\begin{equation*}
 		S^2(\alpha t) = S^2((\alpha t_1, \dots, \alpha t_m)) = \alpha^2 S^2(t)
 	\end{equation*}
 	
 	Thus, the value of our metric depends not only on the total relation between values in the sample, but also on the absolute values of these values. This is the effect we saw on chart 15. For a higher probability mass of a valid token, the low value of the uncertainty estimate that we selected is not due to the consistency of the models, but rather to the values of probabilities, i.e. the variance of near zero probabilities always lower, because of property above.
 
-	However, despite this, by comparing the variance of the correct and false token with equal probabilities, we can observe that the expected variance for the correct token is lower than for the erroneous one. Therefore, although not on the entire probability mass, but on some of its part, our estimation of uncertainty gives adequate predictions.
+	However, despite this, by comparing the variance of the correct and false token with equal probabilities, we can observe that the expected variance for the correct token is lower than for the false one. Therefore, although not on the entire probability mass, but on some of its part, our estimation of uncertainty gives adequate predictions.
 
 	In order to make sure of this, you need to see how our rating behaves on other tokens of the same softmax. To do this, we will consider: a random token, tokens with top-3, top-5, and top-20 probabilities in a descending series of variations. The final graphs of the probability distribution and uncertainty estimates can be seen in figure 16.
 	
@@ -498,12 +570,12 @@ Then the machine translation model sets the following cumulative probability:
 	
 	\begin{figure}[H]
 		\center{
-			\includegraphics[width=0.6\textwidth]{dummy.png}
+			\includegraphics[width=\textwidth]{images/inens_stats_top.png}
 		}
 		\center{\caption{Token-level ensemble probability and inensemble variance for correct token, first error token, random token, top-3 top-5 and top-20 tokens}}
 	\end{figure}
 	
-\section{Probability distribution calibration}
+\subsection{Probability distribution calibration}
 	Our task now is to renormalize the probability distributions of tokens with the uncertainty metric in such a way that the distribution of the correct token becomes more prevalent in terms of choosing the final hypothesis by the model. Thus, the problem is reduced to finding some function $g$:
 	\begin{equation*}
 		\hat{p}(y | x, \mathcal{D}) = softmax(g(p(y | x, \mathcal{D}),\, inens\_var(y)))
@@ -513,59 +585,82 @@ Then the machine translation model sets the following cumulative probability:
 	
 	\begin{figure}[t]
 		\center{
-			\includegraphics[width=0.6\textwidth]{dummy.png}
+			\includegraphics[width=0.6\textwidth]{images/calibration_baseline_scatter.png}
 		}
 		\center{\caption{Token-level ensemble probability by inensemble variance for correct token, first error token, random token, top-3 top-5 and top-20 tokens}}
 	\end{figure} 
 	
 	Remind that we want to penalize for high values of uncertainty, but not so much as to overweight completely irrelevant tokens. A bad example of the $g$ function would be:
-	Здесь и далее положим: $\sigma^2 := inens\_var$
+	
+	Here and further, let us denote: $\sigma^2 := inens\_var$
 	\begin{equation}
 		g_{naive} := \log p(y | x, \mathcal{D}) - \log(\sigma^2)
 	\end{equation}
 	
-	We explicitly reward tokens with a very low variance value and, conversely, heavily penalize them for high uncertainty values. This naive approach leads to a diametrically opposite situation (image 18). We can see that such strong penalties lead to a high probability of accepting random tokens. This is because the variance of random tokens is extremely low due to the property of the metric that we discussed earlier. As a result, the model simply produces completely random translations.
+	We explicitly reward tokens with a very low variance value and, conversely, heavily penalize them for high uncertainty values. This naive approach leads to a diametrically opposite situation that we want to get (image 18(a)). We can see that such strong penalties lead to a high probability of accepting random tokens. This is because the variance of random tokens is extremely low due to the property of the variance that we discussed earlier. As a result, the model simply produces completely random translations.
 	
 	\begin{figure}[t]
-		\center{
-			\includegraphics[width=0.6\textwidth]{dummy.png}
-		}
-		\center{\caption{Token-level ensemble probability by inensemble variance for correct token, first error token, random token, top-3 top-5 and top-20 tokens for $g_{naive}$}}
+		\begin{subfigure}{.5\textwidth}
+			\includegraphics[width=\textwidth]{images/calibration_naive_scatter.png}
+			\center{\caption{$g = g_{naive}$}}
+		\end{subfigure}
+		\begin{subfigure}{.5\textwidth}
+			\includegraphics[width=\textwidth]{images/calibration_lessnaive_scatter.png}
+			\center{\caption{$g = g_{less\_naive}$}}
+		\end{subfigure}
+		\center{\caption{Token-level ensemble probability by inensemble variance for correct token, first error token, random token, top-3 top-5 and top-20 tokens for $g$}}
 	\end{figure}
 	
-	Let's try to slightly weaken the penalty for uncertainty, divide the probability by the root of the variance:
+	Let us try to slightly weaken the penalty for uncertainty, divide the probability by the root of the variance:
 	\begin{equation}
 		g_{less\_naive} := \log p(y | x, \mathcal{D}) - \log(\sigma)
 	\end{equation}
 	
-	As we can see from graph 19, this did not bring any success, since we did not even change the relative order of probability distributions.
-	\begin{figure}[t]
-		\center{
-			\includegraphics[width=0.6\textwidth]{dummy.png}
-		}
-		\center{\caption{Token-level ensemble probability by inensemble variance for correct token, first error token, random token, top-3 top-5 and top-20 tokens for $g_{less\_naive}$}}
-	\end{figure}
+	As we can see from graph 18(b), this did not bring any success, since we did not even change the relative order of probability distributions.
 
 	If we take another look at graph 17, it will be clear that we cannot use linear functions $g$ to rearrange the order of distributions in terms of probabilities (recall that the graph is presented in log scales). Thus, we come to the conclusion that the calibration must not be linear by $\log \sigma^2$, moreover, the peak (maximum point) must fall on a part of the distribution of the correct token, which is not overlapped by any other distribution.
 
-	Then let's take a function:
+	Then let us take a function:
 	\begin{equation}
 		g_{2} := \log p(y | x, \mathcal{D}) - (\log(\sigma) + \alpha)^2
 	\end{equation}
 	
-	 Where $\alpha$ is a certain hyperparameter that will depend on which point the maximum will be reached. Let's consider a special example (graph 20).
+	 Where $\alpha$ is a certain hyperparameter that will depend on which point the maximum will be reached. Let us consider a special example (graph 19(a)).
+	\begin{figure}[t]
+		\begin{subfigure}{.5\textwidth}
+			\includegraphics[width=\textwidth]{images/calibration_g2_scatter.png}
+			\center{\caption{Calibrated probabilities by variance}}
+		\end{subfigure}
+		\begin{subfigure}{.5\textwidth}
+			\includegraphics[width=\textwidth]{images/calibration_g2_probs.png}
+			\center{\caption{Calibrated probabilities histogram}}
+		\end{subfigure}
+		\center{\caption{$g_2$ statistics for correct token, first error token, random token, top-3 top-5 and top-20 tokens. \\
+		$g_2 = \log p(y | x, \mathcal{D}) - (\log(\sigma) + 4)^2$}}
+	\end{figure}
 	
-	\textbf{TODO Conclusion}
+	As we can see, now most probability mass of correct token moved forward to first positions in probability variational series, but also top tokens moved forward too. By the reason of fact, all tokens' distributions are mixed, we can not certainly separate correct token distribution from any other. But we can make correct token more prevailing over any other token on a fixed variance counter level. As we can see on a chart, we achieve this goal.
 	
 	Note that the density of the wrong token still remains to the right of the density of the correct token. Unfortunately or fortunately, we can't do anything with these points, because if a certain token has a high probability on the same contour line of variance, obviously, we should give preference to this particular token. However, even this results can lead to good results, because in the case of a non-single beam size, even a small overweight can lead to the choice of correct hypotheses, because the choice of hypothesis is based on cumulative probabilities, not on a greedy choice.
-	\begin{figure}[H]
-		\center{
-			\includegraphics[width=0.6\textwidth]{dummy.png}
-		}
-		\center{\caption{Token-level $softmax(g_2)$ by inensemble variance for correct token, first error token, random token, top-3 top-5 and top-20 tokens}}
+	
+	If we take a look at figure 19(b), we can see ensemble probability distributions after $g_2$ calibration. Our hypothesis about correct token prevailation confirms.
+	
+	An important note about results is that, while we use beam search with beam size equal $1$, we will not earn better results using $g_2$ calibration, because most part of first error token is still most probable. But if we consider beam search model with beam size more than $1$, we can expect quality improvement, because non-greedy beam search not always chooses most likely token and estimate next token probability using cumulative prefix probability.
+
+\subsection{Calibration BLEU}
+	Let us consider BLEU4 evaluation on a test set for calibrated ensemble.
+	
+	\begin{figure}[t]
+		\begin{subfigure}{.5\textwidth}
+			\includegraphics[width=\textwidth]{images/calibratin_bleu_all.png}
+			\center{\caption{}}
+		\end{subfigure}
+		\begin{subfigure}{.5\textwidth}
+			\includegraphics[width=\textwidth]{images/calibration_bleu_best.png}
+			\center{\caption{}}
+		\end{subfigure}
+		\center{\caption{BLEU4 by beam size for calibrated transformer ensemble}}
 	\end{figure}
-\section{Calibration BLEU}
-	\textbf{TODO}
 	
 \section{Conclusion}
 	\textbf{TODO}
