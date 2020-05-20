@@ -59,7 +59,7 @@
 		machine translation, uncertainty estimation, beam search, larger beam size problem, model uncertainty, data uncertainty
 		
 	\section{Introduction}
-	Nowdays machine translation is one of the most popular areas of machine learning. There are two fundamental approaches to solving this problem: statistical and neural machine translation. In the first case, classical approaches of classical statistical machine learning are used, in the second - modern technologies of deep learning. As in any field, there are a lot of actual unresolved problems in machine translation. In particular, in contrast to statistical machine translation, in neural machine translation  quality of prediction degradation with an increase in the width of the hypothesis search appears.
+	Nowdays machine translation is one of the most popular areas of machine learning. There are two fundamental approaches to solving this problem: statistical and neural machine translation. In the first case, classical approaches of classical statistical machine learning are used, in the second - modern technologies of deep learning. As in any field, there are a lot of actual unresolved problems in machine translation. In particular, in contrast to statistical machine translation, in neural machine translation  quality of prediction degradation appears with a hypothesis search width increase.
 	
 	Another relatively modern area in machine learning is uncertainty estimation. Using the methods of uncertainty estimation it is possible to build metrics for confidence in predictions of models. There are several types of uncertainties. Some of them are caused by certain artifacts in the data, while others are caused by the model's ability to understand the proposed data. In any case, the uncertainty estimates indicate that the model is doubtful about making certain predictions.	
 	
@@ -243,8 +243,6 @@ Then the machine translation model sets the following cumulative probability:
 	
 	In this section, we investigated the possible causes of the beam problem, as well as methods of counteraction. Unfortunately, it is not possible to draw unambiguous conclusions from the results of the article about which method shows the best results due to the fact that the experiments in the articles were carried out in different configurations. According to approximate estimates, both methods show good results, are easy to implement, but do not solve the problem completely.
 	
-	In the next section, we look at a different view of the beam problem, from the perspective of uncertainty.
-	
 	\section{Uncertainty}
 	\subsection{Definition}
 	This information was obtained from the article \bibref{prior}{Malinin et al.}{2018}
@@ -363,7 +361,7 @@ Then the machine translation model sets the following cumulative probability:
 		correct(y^{i}, \textbf{r}) := [y^{i} \in \textbf{r}]
 	\end{equation}
 	
-	This indicator value will be our target function, which we want to predict based on the uncertainty estimation. Now we introduce the \textit{total uncertainty estimation}:
+	This indicator value will be our target function, which we want to predict based on the uncertainty estimation. Malinin introduces the \textit{total uncertainty estimation}:
 	\begin{equation}
 		TU(y_i) := \mathcal{H}[P(y_i|y_{<i}, \mathcal{D})]
 	\end{equation}
@@ -378,9 +376,9 @@ Then the machine translation model sets the following cumulative probability:
 		}
 		\center{\caption{PR-curve for misclassification detection by TU}}
 	\end{figure}
-	The results of the experiment can be seen in image 8. If we try to maximize the F1-score, the indicators turned out to be worse than the random predictor. However, if we are intesting only in a small percentage of errors, we can get a relatively good detection accuracy.
+	The results of the experiment can be seen in image 8. If we try to maximize the F1-score, results turned out to be worse than the random predictor. However, if we are intresting only in a small percentage of errors, we can get a relatively good detection accuracy.
 
-	The results obtained by us are consistent with the thesis put forward by Malinin. It would seem that we have fixed a very easy correctness indicator (any token that is not in the translation at all is considered as an error), but the uncertainty estimation works worse than a random prediction. The problem lies in the fact that if the translation is a close meaning synonym, in which the ensemble models are strongly confident, then from the point of view of our indicator - this is an error, but the uncertainty estimation will not detect any anomalies. As noted by Malinin in his article, the solution to the problem will be human manual data markup to identify more meaningful targets in this experiment.
+	The results obtained by us are consistent with the thesis put forward by Malinin. It would seem that we have fixed easy correctness indicator (any token that is not in the translation at all is marked as an error), but the uncertainty estimation works worse than a random prediction. The problem lies in the fact that if the translation is a close meaning synonym, in which the ensemble models are strongly confident, then from the point of view of our indicator - this is an error, but the uncertainty estimation will not detect any anomalies. As noted by Malinin in his article, the solution to the problem will be human manual data markup to identify more meaningful targets in this experiment.
 
 	However, we will still try some other approaches and try to compare them with the current. We may be able to use other ratings or similarity indicators to achieve higher quality.
 	
@@ -431,7 +429,7 @@ Then the machine translation model sets the following cumulative probability:
 		\end{subfigure}
 		\center{\caption{Misclassification detection by TU. $\delta(y^i, \textbf{r})$}}
 	\end{figure}	
-	And consider the results in image 10(a). This time, there are very good results. However, they are not caused by the fact that we have selected a more reasonable correctness indicator, but by the fact that this indicator defines the concept of error more strictly. Now it is more likely to meet a misclassification and as a result, the uncertainty estimates have become easier to deal with this. Therefore, these results are not very reasonable. This is easy to see if we consider the ROC in image 10(b). Our empirical model does not do much better than a random algorithm. It is important to note that after we strengthened the correctness condition, the percentage of positive class increased significantly (0.76 against 0.26 in the previous statement). In this statement, we can trust ROC, since the positive class prevails and as a result, the balance of classes does not worsen experiment results.
+	And consider the results in image 10(a). This time there are good results. However, they are not caused by the fact that we have selected a more reasonable correctness indicator, but by the fact that this indicator defines the concept of error more strictly. Now it is more likely to meet a misclassification and as a result, the uncertainty estimates have become easier to deal with this. Therefore, these results are not very reasonable. This is easy to see if we consider the ROC in image 10(b). Our empirical model does not do much better than a random algorithm. It is important to note that after we strengthened the correctness condition, the percentage of positive class increased significantly (0.76 against 0.26 in the previous statement). In this statement, we can trust ROC, since the positive class prevails and as a result, the balance of classes does not worsen experiment results.
 	
 	\begin{figure}[t]
 		\begin{subfigure}{.45\textwidth}
@@ -449,15 +447,17 @@ Then the machine translation model sets the following cumulative probability:
 	
 	As for previous correctness indicator, we considers data unceratainty estimate and $\mathbb{KL}$ estimate on figure 11.
 	
+	In all considered cases results are unreasonable. We can not trust metrics, while we use groundless correctness indicator.
+	
 \subsection{Experiment correctness}
 	\begin{wrapfigure}{l}{0.5\textwidth}
 		\includegraphics[width=0.5\textwidth]{images/ens_entropy.png}
 		\center{\caption{Ensemble softmax Shannon entropy}}
 	\end{wrapfigure}
 	
-	An important question arises: why a classification error can correlate with the uncertainty estimate TU. Let's try to answer this question.
+	An important question arises: why a classification error can correlate with the uncertainty estimate TU.
 	
-	Let's try to estimate the density of the softmax entropy distribution for two cases: we correctly predict the token and we made the first error in the sentence (we predicted the entire prefix before this token correctly). In the other words, for each such case, we will calculate the softmax entropy and construct empirical density estimates (normalized histograms). The results can be seen in image 12.
+	Let us try to estimate the density of the softmax entropy distribution for two cases: we correctly predict the token and we made the first error in the sentence (we predicted the entire prefix before this token correctly). In the other words, for each such case, we will calculate the softmax entropy and construct empirical density estimates (normalized histograms). The results can be seen in image 12.
 
 	As we can see, the densities in both cases are distributed almost normally, unimodally. Moreover, the entropy distribution mode of correct tokens lies strictly to the left of the distribution mode for the first error, i.e. most of the probability mass of correct tokens has a lower softmax entropy (the TU metric).
 
@@ -486,7 +486,7 @@ Then the machine translation model sets the following cumulative probability:
 		]
 	\end{equation*}
 	
-	Firstly, we should interpret this kind of uncertainty estimate. $\mathbb{KL}$-divergence measures difference between two distributions (more - worse), this estimate is always non-negative. While we take expectation of estimate, we try to average difference between softmaxes among all possible models pairs. We can interpret $\mathcal{K}[y, \theta]$ as average value of difference between models predictions. Therefore, this metric shows us how models in ensemble conform with each other. Prerequisite to use this kind of uncertainty estimate is that it is possible, more inconsistent prediction models in ensemble make, higher probability we get to make a mistake on current token. Less formal, $\mathcal{K}[y, \theta]$ correlate with errors in predictions.
+	Firstly, we should interpret this kind of uncertainty estimate. $\mathbb{KL}$-divergence measures difference between two distributions (more - further), this estimate is always non-negative. While we take expectation of estimate, we try to average difference between softmaxes among all possible models pairs. We can interpret $\mathcal{K}[y, \theta]$ as average value of difference between models predictions. Therefore, this metric shows us how models in ensemble conform with each other. Prerequisite to use this kind of uncertainty estimate is that it is possible, more inconsistent prediction models in ensemble make - higher probability we get to make a mistake on current token. Less formal, $\mathcal{K}[y, \theta]$ correlate with errors in predictions.
 	
 	Final statistics can be seen at figure 13(a). As in previous case, correct prefix density separable from first error token distribution. Moreover, expected value of kullback-leibler divergence is less than first error token's one. It meens for us, that correlation we discussed earlier exists and it could be effective to use this kind of uncertainty estimate in misclassification problem. 
 	
@@ -504,11 +504,11 @@ Then the machine translation model sets the following cumulative probability:
 \subsection{Using on practice}
 	Let's assume that we were able to achieve imressive results by constructing some uncertainty estimate $PerfectTU$. How can we use this to improve quality?
 
-	Unfortunately, there are not many opportunities. All we can do is mark the positions in the sentences where we are wrong and, as a result, change our predictions. Due to the consistency of machine translation models, it would be logical to build a re-prediction not based on the original model, but to refer to some Oracle that produces more reliable predictions. In practice, such an Oracle could be some assessor or moderator. However, this approach imposes strong restrictions on the use of uncertainty estimation, since not every project can afford the support of human resources. Moreover, if you need to make fast online predictions in a task, you can no longer use moderators.
+	Unfortunately, there are no many opportunities. All we can do is to mark positions in the sentences where we are wrong and, as a result, change our predictions. Due to the consistency of machine translation models, it would be logical to build a re-prediction not based on the original model, but to refer to some Oracle that produces more reliable predictions. In practice, such an Oracle could be some assessor or moderator. However, this approach imposes strong restrictions on the use of uncertainty estimation, since not every project can afford the support of human resources. Moreover, if you need to make fast online predictions in a task, you can no longer use moderators.
 
-	Thus, we need to change the way we evaluate uncertainty. We need to find a way of estimating so that our model can change the predictions based on the uncertainty assessment itself. Now this is not possible, because the predicted tokens with a fixed prefix have the same uncertainty rating. As our next approach, we will not build estimates for the entire softmax at once, but for each token in the softmax separately.
+	Thus, we need to change the way we evaluate uncertainty. We need to find a way of estimating so that our model can change the predictions based on the uncertainty estimates itself. Now this is not possible, because the predicting tokens with a fixed prefix have the same uncertainty rating. As our next approach, we will not build estimates for the entire softmax at once, but for each token in the softmax separately.
 
-	In the previous sections we have considered KL as an evaluation of knowledge uncertainty. Let's introduce a metric that will correlate with KL, but will be built for each token.
+	In the previous sections we have considered KL as an evaluation of knowledge uncertainty. Let us introduce a metric that will correlate with KL, but will be built for each token.
 	
 \subsection{Beam search}
 	We conduct missclassification detection experiment for different beam size (1, 5, 9, 20, 50). We explore that for both correctness indicator with beam size growth PR-AUC degradate. It is not a significant result, because the reason of this phenomena lies in correctness indicator definition. For examle, if we consider $correct(y^i, \textbf{r})$, while beam size grows, probability to meet incorrect token in beam search grows, too, because of low positive class ratio ($~0.25$).
@@ -521,7 +521,7 @@ Then the machine translation model sets the following cumulative probability:
 		P(y_i | y_{<i}, x, \mathcal{D}) = \frac1{K} \sum_{j=1}^{K}P(y_i | y_{<i}, x, \theta_j)
 	\end{equation*}
 	
-	Thus, for each token, we have: a conditional probability of the token for the ensemble and K conditional probabilities of the token for the models. Let's introduce an unbiased sample variance of the token probability along the models in the ensemble as a measure of uncertainty:
+	Thus, for each token, we have: a conditional probability of the token for the ensemble and K conditional probabilities of the token for the models. Let us introduce an unbiased sample variance of the token probability along the models in the ensemble as a measure of uncertainty:
 	\begin{equation}
 		inens\_var(y_i) := S^2(P(y_i | y_{<i}, x, \theta_1), \dots, P(y_i | y_{<i}, x, \theta_K))
 	\end{equation}
