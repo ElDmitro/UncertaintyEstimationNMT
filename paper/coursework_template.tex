@@ -449,10 +449,6 @@ Then the machine translation model sets the following cumulative probability:
 	
 	As for previous correctness indicator, we considers data unceratainty estimate and $\mathbb{KL}$ estimate on figure 11.
 	
-	\textbf{Пассаж про beam size}
-
-
-	
 \subsection{Experiment correctness}
 	\begin{wrapfigure}{l}{0.5\textwidth}
 		\includegraphics[width=0.5\textwidth]{images/ens_entropy.png}
@@ -513,6 +509,11 @@ Then the machine translation model sets the following cumulative probability:
 	Thus, we need to change the way we evaluate uncertainty. We need to find a way of estimating so that our model can change the predictions based on the uncertainty assessment itself. Now this is not possible, because the predicted tokens with a fixed prefix have the same uncertainty rating. As our next approach, we will not build estimates for the entire softmax at once, but for each token in the softmax separately.
 
 	In the previous sections we have considered KL as an evaluation of knowledge uncertainty. Let's introduce a metric that will correlate with KL, but will be built for each token.
+	
+\subsection{Beam search}
+	We conduct missclassification detection experiment for different beam size (1, 5, 9, 20, 50). We explore that for both correctness indicator with beam size growth PR-AUC degradate. It is not a significant result, because the reason of this phenomena lies in correctness indicator definition. For examle, if we consider $correct(y^i, \textbf{r})$, while beam size grows, probability to meet incorrect token in beam search grows, too, because of low positive class ratio ($~0.25$).
+	
+	Moreover, we do not find any correlation between beam size and uncertainty. As follow, considered uncertainty estimates can not solve larger beam size problem explicitly (in the way we do uncertainty estimation).
 
 \section{Inensemble uncertainty estimate}
 	Recall that for each token, we have denoted probability:
@@ -648,7 +649,7 @@ Then the machine translation model sets the following cumulative probability:
 	An important note about results is that, while we use beam search with beam size equal $1$, we will not earn better results using $g_2$ calibration, because most part of first error token is still most probable. But if we consider beam search model with beam size more than $1$, we can expect quality improvement, because non-greedy beam search not always chooses most likely token and estimate next token probability using cumulative prefix probability.
 
 \subsection{Calibration BLEU}
-	Let us consider BLEU4 evaluation on a test set for calibrated ensemble.
+	Let us consider BLEU4 evaluation on a test set for calibrated ensemble (figure 20).
 	
 	\begin{figure}[t]
 		\begin{subfigure}{.5\textwidth}
@@ -662,9 +663,32 @@ Then the machine translation model sets the following cumulative probability:
 		\center{\caption{BLEU4 by beam size for calibrated transformer ensemble}}
 	\end{figure}
 	
-\section{Conclusion}
-	\textbf{TODO}
+	\begin{figure}[t]
+		\begin{subfigure}{.5\textwidth}
+			\includegraphics[width=\textwidth]{images/calibration_g10_scatter.png}
+			\center{\caption{Calibrated probabilities by variance}}
+		\end{subfigure}
+		\begin{subfigure}{.5\textwidth}
+			\includegraphics[width=\textwidth]{images/calibration_g10_probs.png}
+			\center{\caption{Calibrated probabilities histogram}}
+		\end{subfigure}
+		\center{\caption{$g_2$ statistics for correct token, first error token, random token, top-3 top-5 and top-20 tokens. \\
+		$g_2 = \log p(y | x, \mathcal{D}) - (\log(\sigma) + 10)^2$}}
+	\end{figure}
 	
+	As we can see, baseline ensemble without any calibration overperforms all our tested calibrated models. The worst results are presented by square calibration with bias equal $10$. BLEU is less than 5 for this case. The reason of this poor results can be seen at figure 21. After calibration all top-20 (including all more probable tokens) mix together that is why in lots of cases softmaxes have more entropy (recall it meens that our model more uncertain in predictions), so we get a lot of more random predicted tokens. The problem is we choose bias too large and calibration scatter peak is not on correct token distribution but on irrelevant tokens (top-5 top-20 tokens). Therefore, we get too low BLEU.
+	
+	More significant results are presented by calibration with bias equal $4$. The problem in this case is similar to previous one. Now peak is placed on more relevant tokens, but still irrelevant (top-3) tokens enter in resulting predictions. Therefore, let us conduct same experiment but with less bias.
+	
+	\textbf{TODO Bias == 1.1}
+	
+	Overall, we consider different kinds of calibration, but we did not achieve quality improvement. The reason of poor final results lie on a weak uncertainty estimate. If we look at figure 16, we can see that inensemble variance distribution for correct token overlap all tokens distributions (except random one) that is why, it is too hard to separate correct token from others. Too small part of correct token distribution for variance is separable from others. This part is too small to get enough quality improvement.
+\section{Conclusion}
+	In this work we conduct misclassification detection experiments, using different types of uncertainty estimates, on neural machine translation task. We explore correlation between uncertainty and predictions error, analysing uncertainty estimates distributions. Our conclusion is that it is possible to detect prediciton error via uncertainty estimation, because considered uncertainty estimates correlate with errors (correct tokens have lower expected values than others). At the same time, it is hard to evaluate correct quality estimation for misclassification detection via uncertainty, because there are lots of problems with defining reasonable tokens correctness measure.
+	
+	Moreover, we go deeper softmax level and explore new way of uncertainty estimation. We introduce inensemble uncertainty estimate for every token. We approve correlation between new measure and predictions error. As well, we try to recalibrate token probabilities using token-level inensemble varinace.
+	
+	Unfortunately, we do not achive model quality improvement, but also we do not claim that this hypothesis is wrong. Further studies should conduct same experiments using different uncertainty estimates. As we conclude inensemble variance distribution has weak correlation with error predictions to achive high quality improvement.
 	
 	\begin{thebibliography}{0}		
 		\bibitem{fconv}\hypertarget{fconv}{}
